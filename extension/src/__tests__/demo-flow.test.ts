@@ -10,6 +10,12 @@ import { createMessage } from '@popcorn/shared';
 import { runFullDemo } from '../background/demo-flow.js';
 import type { DemoFlowDeps } from '../background/demo-flow.js';
 
+// Mock the offscreen manager so Recorder doesn't actually create documents
+vi.mock('../background/offscreen-manager.js', () => ({
+  ensureOffscreenDocument: vi.fn(() => Promise.resolve()),
+  closeOffscreenDocument: vi.fn(() => Promise.resolve()),
+}));
+
 // -- Chrome mock --
 const chromeMock = {
   tabs: {
@@ -19,47 +25,94 @@ const chromeMock = {
     captureVisibleTab: vi.fn(),
   },
   tabCapture: {
-    capture: vi.fn(),
+    getMediaStreamId: vi.fn(
+      (_options: unknown, callback: (streamId: string) => void) => {
+        // Default: simulate failure so recording is unavailable (matches existing test behavior)
+        (chromeMock.runtime as any).lastError = { message: 'Tab capture not available' };
+        callback('');
+        (chromeMock.runtime as any).lastError = null;
+      },
+    ),
   },
   runtime: {
-    lastError: null,
+    lastError: null as chrome.runtime.LastError | null,
     onMessage: { addListener: vi.fn(), removeListener: vi.fn() },
-    sendMessage: vi.fn(),
+    sendMessage: vi.fn(() => Promise.resolve({ success: true })),
+    getURL: vi.fn((path: string) => `chrome-extension://mock-id/${path}`),
+    getContexts: vi.fn(() => Promise.resolve([])),
+  },
+  offscreen: {
+    createDocument: vi.fn(() => Promise.resolve()),
+    closeDocument: vi.fn(() => Promise.resolve()),
+    Reason: { USER_MEDIA: 'USER_MEDIA' },
   },
 };
 
 vi.stubGlobal('chrome', chromeMock);
 
-// Mock MediaRecorder for recording tests
-class MockMediaRecorder {
-  state = 'inactive' as 'inactive' | 'recording' | 'paused';
-  ondataavailable: ((event: { data: Blob }) => void) | null = null;
-  onstop: (() => void) | null = null;
-  onerror: (() => void) | null = null;
-  mimeType = 'video/webm';
+// ---------------------------------------------------------------------------
+// Mock IndexedDB for blob transfer between offscreen and background
+// ---------------------------------------------------------------------------
 
-  start(_timeslice?: number) {
-    this.state = 'recording';
-  }
+const transferStore = new Map<string, Blob>();
 
-  stop() {
-    this.state = 'inactive';
-    // Deliver some data
-    if (this.ondataavailable) {
-      this.ondataavailable({ data: new Blob(['video-data'], { type: 'video/webm' }) });
-    }
-    // Fire onstop callback
-    if (this.onstop) {
-      this.onstop();
-    }
-  }
-
-  static isTypeSupported(_type: string) {
-    return true;
-  }
+function createMockIDBObjectStore() {
+  return {
+    put(value: any, key: string) {
+      transferStore.set(key, value);
+      const req = { result: undefined as any, onsuccess: null as any, onerror: null as any };
+      Promise.resolve().then(() => req.onsuccess?.());
+      return req;
+    },
+    get(key: string) {
+      const result = transferStore.get(key);
+      const req = { result, onsuccess: null as any, onerror: null as any };
+      Promise.resolve().then(() => req.onsuccess?.());
+      return req;
+    },
+    delete(key: string) {
+      transferStore.delete(key);
+      const req = { result: undefined as any, onsuccess: null as any, onerror: null as any };
+      Promise.resolve().then(() => req.onsuccess?.());
+      return req;
+    },
+  };
 }
 
-vi.stubGlobal('MediaRecorder', MockMediaRecorder);
+function createMockIDBTransaction() {
+  const store = createMockIDBObjectStore();
+  const tx = {
+    objectStore: vi.fn(() => store),
+    oncomplete: null as any,
+  };
+  Promise.resolve().then(() => tx.oncomplete?.());
+  return tx;
+}
+
+function createMockIDBDatabase() {
+  return {
+    objectStoreNames: { contains: vi.fn(() => true) },
+    createObjectStore: vi.fn(),
+    transaction: vi.fn(() => createMockIDBTransaction()),
+    close: vi.fn(),
+  };
+}
+
+const mockIndexedDB = {
+  open(_name: string, _version?: number) {
+    const db = createMockIDBDatabase();
+    const req = {
+      result: db,
+      onsuccess: null as any,
+      onerror: null as any,
+      onupgradeneeded: null as any,
+    };
+    Promise.resolve().then(() => req.onsuccess?.());
+    return req;
+  },
+};
+
+vi.stubGlobal('indexedDB', mockIndexedDB);
 
 // -- Mock TapeStore --
 function createMockTapeStore() {
@@ -104,9 +157,60 @@ function createStartDemoMessage(plan?: TestPlan): StartDemoMessage {
   });
 }
 
+/**
+ * Helper to make tabCapture.getMediaStreamId fail (default behavior).
+ * This simulates "recording unavailable" so tests focus on the demo flow.
+ */
+function mockRecordingUnavailable() {
+  chromeMock.tabCapture.getMediaStreamId.mockImplementation(
+    (_options: unknown, callback: (streamId: string) => void) => {
+      (chromeMock.runtime as any).lastError = { message: 'Tab capture not available' };
+      callback('');
+      (chromeMock.runtime as any).lastError = null;
+    },
+  );
+}
+
+/**
+ * Helper to make tabCapture.getMediaStreamId succeed with recording.
+ */
+function mockRecordingAvailable() {
+  chromeMock.tabCapture.getMediaStreamId.mockImplementation(
+    (_options: unknown, callback: (streamId: string) => void) => {
+      callback('mock-stream-id');
+    },
+  );
+
+  // Also mock sendMessage to handle offscreen recording messages
+  chromeMock.runtime.sendMessage.mockImplementation((message: any) => {
+    if (message.type === 'offscreen-start-recording') {
+      return Promise.resolve({ success: true });
+    }
+    if (message.type === 'offscreen-stop-recording') {
+      // Simulate offscreen writing blob to shared IndexedDB
+      const blobKey = `recording-${Date.now()}`;
+      transferStore.set(blobKey, new Blob(['video-data'], { type: 'video/webm;codecs=vp9' }));
+      return Promise.resolve({
+        success: true,
+        blobKey,
+        mimeType: 'video/webm;codecs=vp9',
+        duration: 2.0,
+        fileSize: 1024,
+        resolution: { width: 1920, height: 1080 },
+        timestamp: Date.now(),
+      });
+    }
+    return Promise.resolve({ success: true });
+  });
+}
+
 describe('demo-flow', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    transferStore.clear();
+    chromeMock.runtime.lastError = null;
+    // Default: recording unavailable
+    mockRecordingUnavailable();
   });
 
   it('executes test plan and returns demo result', async () => {
@@ -124,13 +228,6 @@ describe('demo-flow', () => {
           timestamp: Date.now(),
         },
       ],
-    });
-
-    // Mock tabCapture failing (no recording available)
-    chromeMock.tabCapture.capture.mockImplementation((_opts: any, cb: Function) => {
-      chromeMock.runtime.lastError = { message: 'Tab capture not available' } as any;
-      cb(null);
-      chromeMock.runtime.lastError = null;
     });
 
     // Mock screenshot capture
@@ -163,12 +260,6 @@ describe('demo-flow', () => {
           timestamp: Date.now(),
         },
       ],
-    });
-
-    chromeMock.tabCapture.capture.mockImplementation((_opts: any, cb: Function) => {
-      chromeMock.runtime.lastError = { message: 'Not available' } as any;
-      cb(null);
-      chromeMock.runtime.lastError = null;
     });
 
     chromeMock.tabs.captureVisibleTab.mockImplementation((_opts: any, cb: Function) => {
@@ -205,12 +296,6 @@ describe('demo-flow', () => {
       ],
     });
 
-    chromeMock.tabCapture.capture.mockImplementation((_opts: any, cb: Function) => {
-      chromeMock.runtime.lastError = { message: 'Not available' } as any;
-      cb(null);
-      chromeMock.runtime.lastError = null;
-    });
-
     chromeMock.tabs.captureVisibleTab.mockImplementation((_opts: any, cb: Function) => {
       cb('data:image/png;base64,thumb');
     });
@@ -240,13 +325,6 @@ describe('demo-flow', () => {
           timestamp: Date.now(),
         },
       ],
-    });
-
-    // tabCapture fails
-    chromeMock.tabCapture.capture.mockImplementation((_opts: any, cb: Function) => {
-      chromeMock.runtime.lastError = { message: 'Tab capture not available' } as any;
-      cb(null);
-      chromeMock.runtime.lastError = null;
     });
 
     chromeMock.tabs.captureVisibleTab.mockImplementation((_opts: any, cb: Function) => {
@@ -280,12 +358,6 @@ describe('demo-flow', () => {
       ],
     });
 
-    chromeMock.tabCapture.capture.mockImplementation((_opts: any, cb: Function) => {
-      chromeMock.runtime.lastError = { message: 'Not available' } as any;
-      cb(null);
-      chromeMock.runtime.lastError = null;
-    });
-
     chromeMock.tabs.captureVisibleTab.mockImplementation((_opts: any, cb: Function) => {
       cb(null);
     });
@@ -305,12 +377,6 @@ describe('demo-flow', () => {
     chromeMock.tabs.sendMessage.mockRejectedValue(
       new Error('Content script not ready'),
     );
-
-    chromeMock.tabCapture.capture.mockImplementation((_opts: any, cb: Function) => {
-      chromeMock.runtime.lastError = { message: 'Not available' } as any;
-      cb(null);
-      chromeMock.runtime.lastError = null;
-    });
 
     const message = createStartDemoMessage();
 
@@ -339,12 +405,6 @@ describe('demo-flow', () => {
       ],
     });
 
-    chromeMock.tabCapture.capture.mockImplementation((_opts: any, cb: Function) => {
-      chromeMock.runtime.lastError = { message: 'Not available' } as any;
-      cb(null);
-      chromeMock.runtime.lastError = null;
-    });
-
     chromeMock.tabs.captureVisibleTab.mockImplementation((_opts: any, cb: Function) => {
       cb(null);
     });
@@ -360,5 +420,39 @@ describe('demo-flow', () => {
 
     expect(result.testPlanId).toBe('custom-plan');
     expect(result.steps).toHaveLength(2);
+  });
+
+  it('captures video when recording is available', async () => {
+    mockRecordingAvailable();
+    const { store } = createMockTapeStore();
+
+    chromeMock.tabs.sendMessage.mockResolvedValue({
+      results: [
+        {
+          stepNumber: 1,
+          action: 'click',
+          description: 'Click button',
+          passed: true,
+          duration: 50,
+          timestamp: Date.now(),
+        },
+      ],
+    });
+
+    chromeMock.tabs.captureVisibleTab.mockImplementation((_opts: any, cb: Function) => {
+      cb('data:image/png;base64,thumb');
+    });
+
+    const message = createStartDemoMessage();
+    const result = await runFullDemo(message, 1, { tapeStore: store });
+
+    expect(result.passed).toBe(true);
+    expect(result.videoMetadata).toBeDefined();
+    expect(result.videoMetadata?.mimeType).toContain('video/webm');
+
+    // Tape should have a video blob saved
+    const savedTape = store.save.mock.calls[0][0];
+    expect(savedTape.videoBlob).toBeInstanceOf(Blob);
+    expect(savedTape.videoBlob.size).toBeGreaterThan(0);
   });
 });

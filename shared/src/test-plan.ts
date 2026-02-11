@@ -60,7 +60,7 @@ export interface TestPlan {
   planName: string;
   description?: string;
   assumptions?: string[];
-  baseUrl: string;
+  baseUrl?: string;
   steps: TestStep[];
   tags?: string[];
   estimatedDuration?: string;

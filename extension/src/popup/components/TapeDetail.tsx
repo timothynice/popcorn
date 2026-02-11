@@ -82,16 +82,47 @@ export function TapeDetail({ tape, onBack }: TapeDetailProps) {
           </div>
         </section>
 
-        {tape.videoMetadata && (
+        {tape.videoUrl && (
+          <section className={styles.section}>
+            <h3 className={styles.sectionTitle}>Video</h3>
+            <div className={styles.videoContainer}>
+              <video
+                controls
+                className={styles.videoPlayer}
+                src={tape.videoUrl}
+              >
+                Your browser does not support video playback.
+              </video>
+              {tape.videoMetadata && (
+                <p className={styles.videoMeta}>
+                  {tape.videoMetadata.filename} • {formatDuration(tape.videoMetadata.duration * 1000)} • {tape.videoMetadata.resolution.width}x{tape.videoMetadata.resolution.height}
+                </p>
+              )}
+            </div>
+          </section>
+        )}
+
+        {!tape.videoUrl && tape.videoMetadata && (
           <section className={styles.section}>
             <h3 className={styles.sectionTitle}>Video</h3>
             <div className={styles.videoPlaceholder}>
               <span className={styles.videoIcon}>🎥</span>
-              <p className={styles.videoText}>Video playback coming soon</p>
-              <p className={styles.videoMetadata}>
+              <p className={styles.videoText}>Video not available (recording may have failed)</p>
+              <p className={styles.videoMeta}>
                 {tape.videoMetadata.filename} • {formatDuration(tape.videoMetadata.duration * 1000)} • {tape.videoMetadata.resolution.width}x{tape.videoMetadata.resolution.height}
               </p>
             </div>
+          </section>
+        )}
+
+        {tape.thumbnailDataUrl && (
+          <section className={styles.section}>
+            <h3 className={styles.sectionTitle}>Thumbnail</h3>
+            <img
+              src={tape.thumbnailDataUrl}
+              alt="Demo thumbnail"
+              className={styles.thumbnail}
+            />
           </section>
         )}
 

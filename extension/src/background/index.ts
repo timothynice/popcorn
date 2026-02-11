@@ -27,9 +27,46 @@ async function ensureTapeStore(): Promise<void> {
 let currentStatus: DemoState = 'idle';
 let currentError: string | null = null;
 
-function broadcastStatus(status: DemoState, error?: string | null): void {
+/** Update the extension icon badge to reflect the current demo state. */
+function updateBadge(status: DemoState): void {
+  switch (status) {
+    case 'recording':
+      chrome.action.setBadgeText({ text: 'REC' });
+      chrome.action.setBadgeBackgroundColor({ color: '#e53e3e' });
+      chrome.action.setTitle({ title: 'Popcorn \u2014 Recording...' });
+      break;
+    case 'complete':
+      chrome.action.setBadgeText({ text: '\u2713' });
+      chrome.action.setBadgeBackgroundColor({ color: '#4ade80' });
+      chrome.action.setTitle({ title: 'Popcorn \u2014 Done!' });
+      break;
+    case 'error':
+      chrome.action.setBadgeText({ text: '!' });
+      chrome.action.setBadgeBackgroundColor({ color: '#f87171' });
+      chrome.action.setTitle({ title: 'Popcorn \u2014 Error' });
+      break;
+    case 'idle':
+    default:
+      chrome.action.setBadgeText({ text: '' });
+      chrome.action.setTitle({ title: 'Popcorn' });
+      break;
+  }
+}
+
+/** Update internal state + badge only (no messaging). Use during the demo
+ *  pipeline when the popup is closed and the offscreen document is active,
+ *  to avoid sending stray messages that could interfere with recording. */
+function updateStatus(status: DemoState, error?: string | null): void {
   currentStatus = status;
   currentError = error ?? null;
+  updateBadge(status);
+}
+
+/** Update state + badge AND broadcast via chrome.runtime.sendMessage.
+ *  Only use when the popup might be open to receive the message and the
+ *  offscreen document is NOT active (i.e. before/after the demo pipeline). */
+function broadcastStatus(status: DemoState, error?: string | null): void {
+  updateStatus(status, error);
   chrome.runtime.sendMessage({
     type: 'status_update',
     payload: { status, error: error ?? null },
@@ -114,7 +151,7 @@ async function handleStartDemoMessage(
 ) {
   console.log('[Popcorn] Received start_demo:', message.payload.testPlanId);
 
-  broadcastStatus('running');
+  updateStatus('recording');
 
   // Ensure TapeStore is ready
   await ensureTapeStore();
@@ -127,31 +164,33 @@ async function handleStartDemoMessage(
   }
 
   const tabId = tabs[0].id;
+  const currentUrl = tabs[0].url;
 
-  // Navigate to base URL if specified
-  if (message.payload.testPlan.baseUrl) {
-    await chrome.tabs.update(tabId, { url: message.payload.testPlan.baseUrl });
+  // Only navigate if baseUrl is specified AND differs from the current URL
+  const targetUrl = message.payload.testPlan.baseUrl;
+  if (targetUrl && targetUrl !== currentUrl) {
+    console.log(`[Popcorn] Navigating to ${targetUrl}`);
+    await chrome.tabs.update(tabId, { url: targetUrl });
     // Wait for page to load
     await new Promise((resolve) => setTimeout(resolve, 2000));
   }
 
   try {
-    broadcastStatus('capturing');
-
-    // Run the full demo pipeline
+    // Run the full demo pipeline (use updateStatus to avoid sending messages
+    // to the offscreen document which could interfere with recording)
     const demoResult = await runFullDemo(message, tabId, { tapeStore, onTapeSaved: notifyTapeSaved });
 
-    broadcastStatus('complete');
+    updateStatus('complete');
 
-    // Return to idle after a brief moment
-    setTimeout(() => broadcastStatus('idle'), 1000);
+    // Return to idle after 3 seconds so the "✓" badge stays visible
+    setTimeout(() => updateStatus('idle'), 3000);
 
     // Wrap as a message for the response
     const resultMessage = createMessage('demo_result', demoResult);
     return resultMessage;
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
-    broadcastStatus('error', errorMsg);
+    updateStatus('error', errorMsg);
     throw error;
   }
 }

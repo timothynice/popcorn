@@ -55,7 +55,21 @@ export async function runFullDemo(
     );
   }
 
-  // 2. Execute the test plan via the orchestrator
+  // 2. Ensure content script is injected (handles extension reload case
+  //    where existing tabs lose their content scripts)
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ['content.js'],
+    });
+  } catch (err) {
+    console.warn(
+      '[Popcorn] Content script injection failed:',
+      err instanceof Error ? err.message : String(err),
+    );
+  }
+
+  // 3. Execute the test plan via the orchestrator
   let demoResult: DemoResult;
   try {
     demoResult = await handleStartDemo(message, tabId);
@@ -72,7 +86,7 @@ export async function runFullDemo(
     throw err;
   }
 
-  // 3. Stop recording and collect video metadata
+  // 4. Stop recording and collect video metadata
   let videoMetadata: VideoMetadata | null = null;
   let videoBlob: Blob | null = null;
 
@@ -98,7 +112,7 @@ export async function runFullDemo(
     videoMetadata: videoMetadata ?? demoResult.videoMetadata,
   };
 
-  // 4. Capture a final screenshot for the tape thumbnail
+  // 5. Capture a final screenshot for the tape thumbnail
   let thumbnailDataUrl: string | null = null;
   try {
     thumbnailDataUrl = await captureScreenshot(tabId);
@@ -106,7 +120,7 @@ export async function runFullDemo(
     // Thumbnail is optional
   }
 
-  // 5. Save tape record
+  // 6. Save tape record
   try {
     const tapeData: Omit<TapeRecord, 'id'> = {
       demoName: testPlan.planName,

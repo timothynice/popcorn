@@ -1,10 +1,20 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import type { TapeRecord as SharedTapeRecord } from '@popcorn/shared';
 import { TapeStore } from '../../storage/tape-store.js';
 import type { TapeRecord as StoredTapeRecord } from '../../storage/tape-store.js';
 
+/** Track created object URLs so we can revoke them on cleanup. */
+const activeObjectUrls = new Set<string>();
+
 /** Map a stored tape record to the shape the popup components expect. */
 function toSharedTapeRecord(stored: StoredTapeRecord): SharedTapeRecord {
+  // Convert video blob to a playable object URL
+  let videoUrl: string | null = null;
+  if (stored.videoBlob) {
+    videoUrl = URL.createObjectURL(stored.videoBlob);
+    activeObjectUrls.add(videoUrl);
+  }
+
   return {
     id: stored.id,
     demoName: stored.demoName,
@@ -17,7 +27,17 @@ function toSharedTapeRecord(stored: StoredTapeRecord): SharedTapeRecord {
     criteriaResults: stored.results.criteriaResults,
     duration: stored.duration,
     timestamp: stored.timestamp,
+    videoUrl,
+    thumbnailDataUrl: stored.thumbnailDataUrl,
   };
+}
+
+/** Revoke all active object URLs to free memory. */
+function revokeObjectUrls(): void {
+  for (const url of activeObjectUrls) {
+    URL.revokeObjectURL(url);
+  }
+  activeObjectUrls.clear();
 }
 
 const tapeStore = new TapeStore();
@@ -42,6 +62,8 @@ export function useTapes() {
 
     try {
       await ensureStore();
+      // Revoke previous object URLs before creating new ones
+      revokeObjectUrls();
       const stored = await tapeStore.list();
       setTapes(stored.map(toSharedTapeRecord));
     } catch (err) {
@@ -75,12 +97,18 @@ export function useTapes() {
     const messageListener = (message: any) => {
       if (message.type === 'tape_saved') {
         refresh();
+        // Auto-select the newly saved tape so the user sees the result immediately
+        if (message.payload?.tapeId) {
+          setSelectedTapeId(message.payload.tapeId);
+        }
       }
     };
     chrome.runtime.onMessage.addListener(messageListener);
 
     return () => {
       chrome.runtime.onMessage.removeListener(messageListener);
+      // Revoke all object URLs when the hook unmounts
+      revokeObjectUrls();
     };
   }, [refresh]);
 

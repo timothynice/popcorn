@@ -1,44 +1,71 @@
 import type { VideoMetadata } from '@popcorn/shared';
+import {
+  ensureOffscreenDocument,
+  closeOffscreenDocument,
+} from '../background/offscreen-manager.js';
 
 export type RecorderState = 'idle' | 'recording' | 'stopped' | 'error';
 
-/**
- * Preferred MIME types in order of priority.
- * vp9 offers better compression; vp8 is the widely-supported fallback.
- */
-const PREFERRED_MIME_TYPES = [
-  'video/webm;codecs=vp9',
-  'video/webm;codecs=vp8',
-  'video/webm',
-];
+// ---------------------------------------------------------------------------
+// Shared IndexedDB for blob transfer (matches offscreen-recorder.ts)
+// ---------------------------------------------------------------------------
 
-/**
- * Select the best supported MIME type for MediaRecorder.
- * Returns the first type that passes `MediaRecorder.isTypeSupported`,
- * or falls back to the empty string (browser default).
- */
-function selectMimeType(): string {
-  for (const mime of PREFERRED_MIME_TYPES) {
-    if (MediaRecorder.isTypeSupported(mime)) {
-      return mime;
-    }
-  }
-  return '';
+const TRANSFER_DB_NAME = 'popcorn-transfer';
+const TRANSFER_STORE_NAME = 'blobs';
+
+function openTransferDB(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(TRANSFER_DB_NAME, 1);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(TRANSFER_STORE_NAME)) {
+        db.createObjectStore(TRANSFER_STORE_NAME);
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function readBlobFromTransferDB(key: string): Promise<Blob> {
+  const db = await openTransferDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(TRANSFER_STORE_NAME, 'readwrite');
+    const store = tx.objectStore(TRANSFER_STORE_NAME);
+    const getReq = store.get(key);
+    getReq.onsuccess = () => {
+      const blob = getReq.result;
+      // Clean up the temporary record after reading
+      store.delete(key);
+      if (blob instanceof Blob) {
+        resolve(blob);
+      } else {
+        reject(new Error('Transfer DB did not contain a Blob'));
+      }
+    };
+    getReq.onerror = () => reject(getReq.error);
+    tx.oncomplete = () => db.close();
+  });
 }
 
 /**
- * Captures video from a browser tab using `chrome.tabCapture` and
- * `MediaRecorder`.  The recording is collected in chunks (1 s timeslice)
- * so partial data is preserved even if the session ends unexpectedly.
+ * Orchestrates video recording via the Chrome Offscreen API.
+ *
+ * MV3 service workers have no DOM, so we cannot use MediaRecorder directly.
+ * Instead this class:
+ * 1. Obtains a stream ID via `chrome.tabCapture.getMediaStreamId()`
+ * 2. Creates an offscreen document (hidden HTML page with DOM access)
+ * 3. Sends the stream ID to the offscreen document via messaging
+ * 4. The offscreen document runs MediaRecorder and stores the blob in
+ *    a shared IndexedDB. Only a small reference key is sent back via messaging.
+ * 5. Background reads the blob from IndexedDB and returns it.
+ *
+ * The public API (start/stop/reset/getState) is unchanged so that
+ * `demo-flow.ts` requires zero modifications.
  */
 export class Recorder {
   private state: RecorderState = 'idle';
-  private mediaRecorder: MediaRecorder | null = null;
-  private chunks: Blob[] = [];
-  private stream: MediaStream | null = null;
   private startTime = 0;
-  private resolution = { width: 0, height: 0 };
-  private mimeType = '';
 
   /** Current recorder state. */
   getState(): RecorderState {
@@ -48,9 +75,8 @@ export class Recorder {
   /**
    * Begin recording the visible content of the tab identified by `tabId`.
    *
-   * Internally this calls `chrome.tabCapture.capture()` to obtain a
-   * `MediaStream`, then pipes it into a `MediaRecorder` with a 1-second
-   * timeslice so chunks accumulate progressively.
+   * Obtains a media stream ID via `chrome.tabCapture.getMediaStreamId()`,
+   * creates an offscreen document, and tells it to start recording.
    *
    * @throws If the recorder is not idle, or if capture/setup fails.
    */
@@ -60,48 +86,32 @@ export class Recorder {
     }
 
     try {
-      // Obtain a MediaStream from the active tab
-      this.stream = await this.captureTab(tabId);
+      // 1. Get a media stream ID for the target tab
+      const streamId = await this.getMediaStreamId(tabId);
 
-      // Determine resolution from the first video track
-      const videoTrack = this.stream.getVideoTracks()[0];
-      if (videoTrack) {
-        const settings = videoTrack.getSettings();
-        this.resolution = {
-          width: settings.width ?? 0,
-          height: settings.height ?? 0,
-        };
+      // 2. Ensure the offscreen document is ready
+      await ensureOffscreenDocument();
+
+      // 3. Tell the offscreen document to start recording with this stream ID
+      const response = await chrome.runtime.sendMessage({
+        type: 'offscreen-start-recording',
+        streamId,
+      });
+
+      if (!response?.success) {
+        throw new Error(response?.error ?? 'Offscreen recording failed to start');
       }
 
-      // Choose the best codec available
-      this.mimeType = selectMimeType();
-
-      const options: MediaRecorderOptions = {};
-      if (this.mimeType) {
-        options.mimeType = this.mimeType;
-      }
-
-      // Create the MediaRecorder
-      this.mediaRecorder = new MediaRecorder(this.stream, options);
-      this.chunks = [];
-
-      this.mediaRecorder.ondataavailable = (event: BlobEvent) => {
-        if (event.data && event.data.size > 0) {
-          this.chunks.push(event.data);
-        }
-      };
-
-      this.mediaRecorder.onerror = () => {
-        this.state = 'error';
-      };
-
-      // Start recording with 1-second timeslice for progressive chunking
-      this.mediaRecorder.start(1000);
       this.startTime = Date.now();
       this.state = 'recording';
     } catch (error) {
       this.state = 'error';
-      this.cleanupStream();
+      // Try to clean up the offscreen document
+      try {
+        await closeOffscreenDocument();
+      } catch {
+        // Ignore cleanup errors
+      }
       const message =
         error instanceof Error ? error.message : 'Unknown capture error';
       throw new Error(`Failed to start recording: ${message}`);
@@ -112,46 +122,57 @@ export class Recorder {
    * Stop recording and return the assembled video blob together with
    * descriptive metadata.
    *
+   * The offscreen document writes the blob to a shared IndexedDB and
+   * returns a reference key. We read the blob from IndexedDB here.
+   *
    * @throws If the recorder is not currently recording.
    */
   async stop(): Promise<{ blob: Blob; metadata: VideoMetadata }> {
-    if (this.state !== 'recording' || !this.mediaRecorder) {
+    if (this.state !== 'recording') {
       throw new Error(`Cannot stop recording: recorder is in "${this.state}" state`);
     }
 
-    return new Promise<{ blob: Blob; metadata: VideoMetadata }>(
-      (resolve, reject) => {
-        const recorder = this.mediaRecorder!;
+    try {
+      // Tell the offscreen document to stop recording
+      const response = await chrome.runtime.sendMessage({
+        type: 'offscreen-stop-recording',
+      });
 
-        recorder.onstop = () => {
-          try {
-            this.cleanupStream();
+      if (!response?.success) {
+        throw new Error(response?.error ?? 'Offscreen recording failed to stop');
+      }
 
-            const mimeType =
-              this.mimeType || recorder.mimeType || 'video/webm';
-            const blob = new Blob(this.chunks, { type: mimeType });
-            const duration = (Date.now() - this.startTime) / 1000;
+      // Read the blob from the shared IndexedDB using the key
+      const blob = await readBlobFromTransferDB(response.blobKey);
 
-            const metadata: VideoMetadata = {
-              filename: '', // Caller assigns the final filename
-              duration,
-              fileSize: blob.size,
-              resolution: { ...this.resolution },
-              mimeType,
-              timestamp: Date.now(),
-            };
+      const metadata: VideoMetadata = {
+        filename: '', // Caller assigns the final filename
+        duration: response.duration,
+        fileSize: response.fileSize,
+        resolution: response.resolution,
+        mimeType: response.mimeType,
+        timestamp: response.timestamp,
+      };
 
-            this.state = 'stopped';
-            resolve({ blob, metadata });
-          } catch (err) {
-            this.state = 'error';
-            reject(err);
-          }
-        };
+      this.state = 'stopped';
 
-        recorder.stop();
-      },
-    );
+      // Close the offscreen document now that we have the data
+      try {
+        await closeOffscreenDocument();
+      } catch {
+        // Non-fatal
+      }
+
+      return { blob, metadata };
+    } catch (error) {
+      this.state = 'error';
+      try {
+        await closeOffscreenDocument();
+      } catch {
+        // Ignore cleanup errors
+      }
+      throw error;
+    }
   }
 
   /**
@@ -159,22 +180,12 @@ export class Recorder {
    * Safe to call from any state.
    */
   reset(): void {
-    if (this.mediaRecorder) {
-      try {
-        if (this.mediaRecorder.state !== 'inactive') {
-          this.mediaRecorder.stop();
-        }
-      } catch {
-        // Ignore -- we are tearing down
-      }
-      this.mediaRecorder = null;
-    }
+    // Try to close the offscreen document (fire and forget)
+    closeOffscreenDocument().catch(() => {
+      // Ignore -- we are tearing down
+    });
 
-    this.cleanupStream();
-    this.chunks = [];
     this.startTime = 0;
-    this.resolution = { width: 0, height: 0 };
-    this.mimeType = '';
     this.state = 'idle';
   }
 
@@ -183,50 +194,29 @@ export class Recorder {
   // ------------------------------------------------------------------
 
   /**
-   * Wrap `chrome.tabCapture.capture` in a promise.
+   * Get a media stream ID for the given tab using the MV3-compatible API.
+   * This replaces the deprecated `chrome.tabCapture.capture()`.
    */
-  private captureTab(_tabId: number): Promise<MediaStream> {
-    return new Promise<MediaStream>((resolve, reject) => {
-      const captureOptions: chrome.tabCapture.CaptureOptions = {
-        audio: true,
-        video: true,
-        videoConstraints: {
-          mandatory: {
-            minWidth: 1280,
-            minHeight: 720,
-            maxWidth: 1920,
-            maxHeight: 1080,
-            maxFrameRate: 30,
-          },
-        },
-      };
-
-      chrome.tabCapture.capture(
-        captureOptions,
-        (stream: MediaStream | null) => {
+  private getMediaStreamId(tabId: number): Promise<string> {
+    return new Promise<string>((resolve, reject) => {
+      chrome.tabCapture.getMediaStreamId(
+        { targetTabId: tabId },
+        (streamId: string) => {
           if (chrome.runtime.lastError) {
             reject(
-              new Error(chrome.runtime.lastError.message ?? 'Tab capture failed'),
+              new Error(
+                chrome.runtime.lastError.message ?? 'Failed to get media stream ID',
+              ),
             );
             return;
           }
-          if (!stream) {
-            reject(new Error('Tab capture returned null stream'));
+          if (!streamId) {
+            reject(new Error('getMediaStreamId returned empty stream ID'));
             return;
           }
-          resolve(stream);
+          resolve(streamId);
         },
       );
     });
-  }
-
-  /** Stop all tracks on the current stream and release the reference. */
-  private cleanupStream(): void {
-    if (this.stream) {
-      for (const track of this.stream.getTracks()) {
-        track.stop();
-      }
-      this.stream = null;
-    }
   }
 }

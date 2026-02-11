@@ -1,6 +1,6 @@
 import type { TestPlan, StepResult } from '@popcorn/shared';
 
-export type DemoState = 'idle' | 'running' | 'capturing' | 'complete' | 'error';
+export type DemoState = 'idle' | 'running' | 'recording' | 'capturing' | 'processing' | 'complete' | 'error';
 
 export interface OrchestratorState {
   status: DemoState;

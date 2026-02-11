@@ -13,11 +13,10 @@ import styles from './App.module.css';
 type View = 'tapes' | 'criteria';
 
 /** A minimal sample test plan used for quick demos from the popup. */
-function buildQuickTestPlan(pageUrl: string): TestPlan {
+function buildQuickTestPlan(): TestPlan {
   return {
     planName: 'quick-demo',
     description: 'Quick demo from popup – captures a recording of the active tab',
-    baseUrl: pageUrl,
     steps: [
       { stepNumber: 1, action: 'wait', description: 'Wait for page', condition: 'timeout', timeout: 500 },
       { stepNumber: 2, action: 'screenshot', description: 'Capture screenshot' },
@@ -31,25 +30,30 @@ function App() {
   const [currentView, setCurrentView] = useState<View>('tapes');
   const [criteria, setCriteria] = useState<string[]>([]);
   const [demoRunning, setDemoRunning] = useState(false);
+  const [demoStarting, setDemoStarting] = useState(false);
   const [demoResult, setDemoResult] = useState<{ passed: boolean; summary: string } | null>(null);
 
   const selectedTape = selectedTapeId
     ? tapes.find((tape) => tape.id === selectedTapeId)
     : null;
 
-  /** Send a start_demo message to the background script. */
+  /** Build and send a start_demo message to the background script. */
+  const buildDemoMessage = (plan: TestPlan, demoCriteria: string[]) => {
+    return createMessage<StartDemoMessage>('start_demo', {
+      testPlanId: plan.planName,
+      testPlan: plan,
+      acceptanceCriteria: demoCriteria,
+      triggeredBy: 'popup',
+    });
+  };
+
+  /** Send start_demo and await the result (used from Criteria view). */
   const sendStartDemo = async (plan: TestPlan, demoCriteria: string[]) => {
     setDemoRunning(true);
     setDemoResult(null);
 
     try {
-      const message = createMessage<StartDemoMessage>('start_demo', {
-        testPlanId: plan.planName,
-        testPlan: plan,
-        acceptanceCriteria: demoCriteria,
-        triggeredBy: 'popup',
-      });
-
+      const message = buildDemoMessage(plan, demoCriteria);
       const response = await chrome.runtime.sendMessage(message);
 
       if (response?.success && response.result?.payload) {
@@ -61,7 +65,6 @@ function App() {
         setDemoResult({ passed: false, summary: response?.error || 'Unknown error' });
       }
 
-      // Refresh tapes list so the new tape shows up
       refreshTapes();
     } catch (err) {
       setDemoResult({
@@ -75,18 +78,26 @@ function App() {
 
   /** Run demo with custom criteria from the Criteria view. */
   const handleRunDemo = async () => {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    const pageUrl = tab?.url || 'about:blank';
-    const plan = buildQuickTestPlan(pageUrl);
+    const plan = buildQuickTestPlan();
     await sendStartDemo(plan, criteria);
   };
 
-  /** Quick demo: record the active tab for a few seconds. */
-  const handleQuickDemo = async () => {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    const pageUrl = tab?.url || 'about:blank';
-    const plan = buildQuickTestPlan(pageUrl);
-    await sendStartDemo(plan, ['All steps pass']);
+  /** Quick demo: shows a brief message, then fires recording.
+   *  The popup will close when recording starts (Chrome behavior)
+   *  but the extension icon badge shows recording progress. */
+  const handleQuickDemo = () => {
+    setDemoStarting(true);
+    setDemoResult(null);
+
+    // Show the starting message briefly, then send the actual message.
+    // The popup will close when the offscreen document is created.
+    setTimeout(() => {
+      const plan = buildQuickTestPlan();
+      const message = buildDemoMessage(plan, ['All steps pass']);
+      chrome.runtime.sendMessage(message).catch((err) => {
+        console.warn('[Popcorn] Failed to start demo:', err);
+      });
+    }, 1500);
   };
 
   const renderDemoResult = () => {
@@ -150,14 +161,21 @@ function App() {
         ) : (
           <>
             <div className={styles.quickDemoBar}>
-              {renderDemoResult()}
+              {demoStarting ? (
+                <div className={styles.demoStartingMessage}>
+                  <span className={styles.demoStartingDot} />
+                  <span>Recording Starting, Popup Closing</span>
+                </div>
+              ) : (
+                renderDemoResult()
+              )}
               <button
                 type="button"
                 onClick={handleQuickDemo}
-                disabled={demoRunning}
+                disabled={demoRunning || demoStarting}
                 className={styles.quickDemoButton}
               >
-                {demoRunning ? 'Recording...' : '\u25CF Record Demo'}
+                {demoStarting ? 'Starting...' : demoRunning ? 'Recording...' : '\u25CF Record Demo'}
               </button>
             </div>
             <TapeList

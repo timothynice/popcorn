@@ -46,6 +46,12 @@ function chromeExtensionPlugin(): Plugin {
         copyFileSync(manifestSrc, resolve(distDir, 'manifest.json'));
       }
 
+      // Copy offscreen.html into dist/
+      const offscreenSrc = resolve(__dirname, 'src', 'offscreen.html');
+      if (existsSync(offscreenSrc)) {
+        copyFileSync(offscreenSrc, resolve(distDir, 'offscreen.html'));
+      }
+
       // Copy icons from assets/ into dist/assets/
       const assetsSrc = resolve(__dirname, 'assets');
       const assetsDist = resolve(distDir, 'assets');
@@ -71,12 +77,17 @@ export default defineConfig({
       input: {
         background: resolve(__dirname, 'src/background/index.ts'),
         content: resolve(__dirname, 'src/content/index.ts'),
+        offscreen: resolve(__dirname, 'src/capture/offscreen-recorder.ts'),
         popup: resolve(__dirname, 'src/popup/index.html'),
       },
       output: {
         format: 'es',
         entryFileNames: (chunkInfo) => {
-          if (chunkInfo.name === 'background' || chunkInfo.name === 'content') {
+          if (
+            chunkInfo.name === 'background' ||
+            chunkInfo.name === 'content' ||
+            chunkInfo.name === 'offscreen'
+          ) {
             return `${chunkInfo.name}.js`;
           }
           return 'popup/[name].js';
