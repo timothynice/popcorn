@@ -1,0 +1,9 @@
+node_modules/
+dist/
+tapes/
+.popcorn/
+.env
+*.tsbuildinfo
+coverage/
+.DS_Store
+*.log

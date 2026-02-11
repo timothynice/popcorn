@@ -1,0 +1,31 @@
+{
+  "name": "authentication",
+  "description": "Validates authentication flows: login succeeds with valid credentials, session persists across pages, logout clears session, and error messages show for invalid credentials.",
+  "criteria": [
+    {
+      "id": "auth-login-success",
+      "description": "Login succeeds with valid credentials and redirects correctly",
+      "type": "functional"
+    },
+    {
+      "id": "auth-session-persists",
+      "description": "Session persists when navigating between pages",
+      "type": "functional"
+    },
+    {
+      "id": "auth-logout-works",
+      "description": "Logout clears the session and redirects to login",
+      "type": "functional"
+    },
+    {
+      "id": "auth-invalid-credentials",
+      "description": "Error message shown for invalid login credentials",
+      "type": "functional"
+    },
+    {
+      "id": "auth-protected-routes",
+      "description": "Protected pages redirect unauthenticated users to login",
+      "type": "functional"
+    }
+  ]
+}

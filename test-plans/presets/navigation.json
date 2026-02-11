@@ -1,0 +1,26 @@
+{
+  "name": "navigation",
+  "description": "Validates navigation flows: links resolve correctly, no 404 errors, breadcrumbs update, and page transitions complete.",
+  "criteria": [
+    {
+      "id": "nav-links-resolve",
+      "description": "All navigation links resolve to valid pages",
+      "type": "functional"
+    },
+    {
+      "id": "nav-no-404",
+      "description": "No 404 or error pages encountered during navigation",
+      "type": "functional"
+    },
+    {
+      "id": "nav-breadcrumbs",
+      "description": "Breadcrumbs reflect the current page correctly",
+      "type": "visual"
+    },
+    {
+      "id": "nav-transitions",
+      "description": "Page transitions complete without errors",
+      "type": "functional"
+    }
+  ]
+}

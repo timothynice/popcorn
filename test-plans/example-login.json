@@ -1,0 +1,13 @@
+{
+  "planName": "example-login",
+  "description": "Test the login flow",
+  "baseUrl": "/",
+  "steps": [
+    { "stepNumber": 1, "action": "navigate", "target": "/login", "description": "Go to login page" },
+    { "stepNumber": 2, "action": "fill", "selector": "input[name='email']", "value": "test@example.com", "description": "Enter email" },
+    { "stepNumber": 3, "action": "fill", "selector": "input[name='password']", "value": "Test1234!", "description": "Enter password" },
+    { "stepNumber": 4, "action": "click", "selector": "button[type='submit']", "description": "Click login" },
+    { "stepNumber": 5, "action": "assert", "assertionType": "url", "expected": "/dashboard", "description": "Verify redirect" }
+  ],
+  "tags": ["login", "authentication"]
+}

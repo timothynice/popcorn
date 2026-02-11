@@ -1,0 +1,258 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.header {
+  padding: 16px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid rgba(96, 165, 250, 0.1);
+}
+
+.backButton {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--accent-blue);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px 0;
+  margin-bottom: 12px;
+  transition: color 0.2s ease;
+}
+
+.backButton:hover {
+  color: var(--text-primary);
+}
+
+.titleSection {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.demoName {
+  font-family: var(--font-mono);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+  flex: 1;
+}
+
+.badge {
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.badgePass {
+  background: rgba(74, 222, 128, 0.15);
+  color: var(--accent-green);
+}
+
+.badgeFail {
+  background: rgba(248, 113, 113, 0.15);
+  color: var(--accent-red);
+}
+
+.content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+}
+
+.section {
+  margin-bottom: 24px;
+}
+
+.section:last-child {
+  margin-bottom: 0;
+}
+
+.sectionTitle {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin: 0 0 12px 0;
+}
+
+.metadata {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.metadataItem {
+  display: flex;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.metadataLabel {
+  color: var(--text-secondary);
+  min-width: 100px;
+}
+
+.metadataValue {
+  color: var(--text-primary);
+}
+
+.summary {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-primary);
+  margin: 0;
+  padding: 12px;
+  background: var(--bg-card);
+  border: 1px solid rgba(96, 165, 250, 0.1);
+  border-radius: var(--radius);
+}
+
+.steps {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.step {
+  padding: 12px;
+  background: var(--bg-card);
+  border: 1px solid rgba(96, 165, 250, 0.1);
+  border-radius: var(--radius);
+}
+
+.stepPassed {
+  border-left: 3px solid var(--accent-green);
+}
+
+.stepFailed {
+  border-left: 3px solid var(--accent-red);
+}
+
+.stepHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.stepIcon {
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.stepNumber {
+  color: var(--text-secondary);
+}
+
+.stepAction {
+  color: var(--accent-blue);
+  font-weight: 600;
+}
+
+.stepDuration {
+  margin-left: auto;
+  color: var(--text-secondary);
+}
+
+.stepDescription {
+  font-size: 12px;
+  color: var(--text-primary);
+  margin: 0;
+  padding-left: 24px;
+}
+
+.stepError {
+  margin-top: 8px;
+  padding: 8px;
+  padding-left: 24px;
+  background: rgba(248, 113, 113, 0.08);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.stepErrorLabel {
+  color: var(--accent-red);
+  font-weight: 600;
+  margin-right: 6px;
+}
+
+.stepErrorMessage {
+  color: var(--text-primary);
+}
+
+.videoPlaceholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  background: var(--bg-card);
+  border: 1px solid rgba(96, 165, 250, 0.1);
+  border-radius: var(--radius);
+  text-align: center;
+}
+
+.videoIcon {
+  font-size: 36px;
+  margin-bottom: 12px;
+  opacity: 0.5;
+}
+
+.videoText {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--text-primary);
+  margin: 0 0 8px 0;
+}
+
+.videoMetadata {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.screenshots {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 12px;
+}
+
+.screenshot {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.screenshotImage {
+  width: 100%;
+  height: auto;
+  border-radius: 4px;
+  border: 1px solid rgba(96, 165, 250, 0.1);
+}
+
+.screenshotLabel {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin: 0;
+  text-align: center;
+}

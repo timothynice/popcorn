@@ -1,0 +1,31 @@
+{
+  "name": "forms",
+  "description": "Validates form interactions: inputs have labels, required fields are filled, form submits successfully, and success/error messages display correctly.",
+  "criteria": [
+    {
+      "id": "form-inputs-labeled",
+      "description": "All form inputs have associated labels",
+      "type": "accessibility"
+    },
+    {
+      "id": "form-required-fields",
+      "description": "Required fields show validation when left empty",
+      "type": "functional"
+    },
+    {
+      "id": "form-submits",
+      "description": "Form submits successfully with valid data",
+      "type": "functional"
+    },
+    {
+      "id": "form-success-message",
+      "description": "Success message displays after valid submission",
+      "type": "visual"
+    },
+    {
+      "id": "form-error-display",
+      "description": "Error messages display for invalid inputs",
+      "type": "functional"
+    }
+  ]
+}
