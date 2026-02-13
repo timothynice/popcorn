@@ -90,12 +90,12 @@ function assembleDemoResult(
     ? false
     : stepResults.every((result) => result.passed || result.action === 'assert');
 
-  // Extract screenshots from results
+  // Extract screenshots from results (check both top-level field and metadata)
   const screenshots: ScreenshotCapture[] = stepResults
-    .filter((result) => result.screenshotDataUrl)
+    .filter((result) => result.screenshotDataUrl || (result.metadata?.screenshotDataUrl))
     .map((result) => ({
       stepNumber: result.stepNumber,
-      dataUrl: result.screenshotDataUrl!,
+      dataUrl: (result.screenshotDataUrl || result.metadata?.screenshotDataUrl) as string,
       timestamp: result.timestamp,
       label: result.description,
     }));

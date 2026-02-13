@@ -1,4 +1,4 @@
-import type { DemoResult, VideoMetadata } from '@popcorn/shared';
+import type { DemoResult, TestPlan } from '@popcorn/shared';
 
 /**
  * A single tape entry representing a recorded demo session.
@@ -17,6 +17,8 @@ export interface TapeRecord {
   videoBlob: Blob | null;
   thumbnailDataUrl: string | null;
   results: DemoResult;
+  /** Stored test plan for re-run capability (e.g. "Re-run with Recording"). */
+  testPlan?: TestPlan;
 }
 
 /** Generate a unique ID for a tape record. */

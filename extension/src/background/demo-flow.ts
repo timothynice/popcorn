@@ -10,6 +10,7 @@ import type {
   VideoMetadata,
   TestStep,
 } from '@popcorn/shared';
+import { generateTapeName } from '@popcorn/shared';
 import { Recorder } from '../capture/recorder.js';
 import { captureScreenshot } from '../capture/screenshot.js';
 import { handleStartDemo } from './demo-orchestrator.js';
@@ -20,6 +21,8 @@ export interface DemoFlowDeps {
   tapeStore: TapeStore | { save: TapeStore['save']; init: TapeStore['init'] };
   /** Optional callback invoked after a tape is saved, e.g. to notify the popup. */
   onTapeSaved?: (tapeId: string) => void;
+  /** When true, skip video recording entirely (e.g. hook-triggered demos with no user gesture). */
+  skipRecording?: boolean;
 }
 
 /**
@@ -44,16 +47,22 @@ export async function runFullDemo(
   const recorder = new Recorder();
   let recordingAvailable = false;
 
-  // 1. Try to start recording (graceful degradation)
-  try {
-    await recorder.start(tabId);
-    recordingAvailable = true;
-    console.log(`[Popcorn] Recording started for tab ${tabId}`);
-  } catch (err) {
-    console.warn(
-      '[Popcorn] Recording unavailable, continuing without video:',
-      err instanceof Error ? err.message : String(err),
-    );
+  // 1. Try to start recording (graceful degradation).
+  //    Skip entirely when skipRecording is set (e.g. hook-triggered demos
+  //    where no user gesture is available for tabCapture).
+  if (!deps.skipRecording) {
+    try {
+      await recorder.start(tabId);
+      recordingAvailable = true;
+      console.log(`[Popcorn] Recording started for tab ${tabId}`);
+    } catch (err) {
+      console.warn(
+        '[Popcorn] Recording unavailable, continuing without video:',
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+  } else {
+    console.log('[Popcorn] Recording skipped (no user gesture available)');
   }
 
   // 2. Handle navigate steps from the background (content script can't
@@ -116,6 +125,62 @@ export async function runFullDemo(
     throw err;
   }
 
+  // 4a. Capture screenshots from the background for any steps that requested it.
+  //     The content script returns a marker (needsBackgroundScreenshot) instead of
+  //     attempting nested messaging, which avoids Chrome message channel issues.
+  //     We also update demoResult.screenshots since assembleDemoResult already ran.
+
+  // Ensure the tab is focused so captureVisibleTab works — during hook-triggered
+  // demos the tab may not be active (popup or devtools could be in front).
+  const hasScreenshotSteps = demoResult.steps.some(
+    (s) => s.metadata?.needsBackgroundScreenshot,
+  );
+  if (hasScreenshotSteps) {
+    try {
+      const tab = await chrome.tabs.get(tabId);
+      if (tab.windowId) {
+        await chrome.windows.update(tab.windowId, { focused: true });
+      }
+      await chrome.tabs.update(tabId, { active: true });
+      // Brief delay for the browser to render the focused tab
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    } catch {
+      // Best-effort focus
+    }
+  }
+
+  for (const stepResult of demoResult.steps) {
+    if (stepResult.metadata?.needsBackgroundScreenshot) {
+      try {
+        const dataUrl = await captureScreenshot(tabId);
+        stepResult.screenshotDataUrl = dataUrl;
+        if (stepResult.metadata) {
+          stepResult.metadata.screenshotDataUrl = dataUrl;
+          delete stepResult.metadata.needsBackgroundScreenshot;
+        }
+        // Push into the already-assembled screenshots array
+        demoResult.screenshots.push({
+          stepNumber: stepResult.stepNumber,
+          dataUrl,
+          timestamp: stepResult.timestamp,
+          label: stepResult.description,
+        });
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        console.warn(
+          `[Popcorn] Background screenshot for step ${stepResult.stepNumber} failed:`,
+          errMsg,
+        );
+        // Mark the step as failed so the UI accurately reflects the capture failure
+        stepResult.passed = false;
+        stepResult.error = `Screenshot capture failed: ${errMsg}`;
+        if (stepResult.metadata) {
+          delete stepResult.metadata.needsBackgroundScreenshot;
+        }
+      }
+    }
+  }
+
   // 5. Stop recording and collect video metadata
   let videoMetadata: VideoMetadata | null = null;
   let videoBlob: Blob | null = null;
@@ -143,7 +208,18 @@ export async function runFullDemo(
   };
 
   // 6. Capture a final screenshot for the tape thumbnail
+  //    Ensure the tab is focused first — captureVisibleTab needs the tab visible.
   let thumbnailDataUrl: string | null = null;
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    if (tab.windowId) {
+      await chrome.windows.update(tab.windowId, { focused: true });
+    }
+    await chrome.tabs.update(tabId, { active: true });
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  } catch {
+    // Best-effort focus for thumbnail
+  }
   try {
     thumbnailDataUrl = await captureScreenshot(tabId);
   } catch {
@@ -153,7 +229,7 @@ export async function runFullDemo(
   // 7. Save tape record
   try {
     const tapeData: Omit<TapeRecord, 'id'> = {
-      demoName: testPlan.planName,
+      demoName: generateTapeName(testPlan),
       testPlanId,
       timestamp: Date.now(),
       duration: resultWithVideo.duration,
@@ -165,6 +241,7 @@ export async function runFullDemo(
       videoBlob,
       thumbnailDataUrl,
       results: resultWithVideo,
+      testPlan,
     };
 
     const tapeId = await deps.tapeStore.save(tapeData);
@@ -173,6 +250,17 @@ export async function runFullDemo(
   } catch (err) {
     console.warn(
       '[Popcorn] Failed to save tape:',
+      err instanceof Error ? err.message : String(err),
+    );
+  }
+
+  // 8. Reset app state by reloading the tab so the next demo starts fresh.
+  try {
+    await reloadTab(tabId);
+    console.log('[Popcorn] Tab reloaded to reset app state');
+  } catch (err) {
+    console.warn(
+      '[Popcorn] Failed to reload tab after demo:',
       err instanceof Error ? err.message : String(err),
     );
   }
@@ -247,5 +335,27 @@ async function navigateTab(tabId: number, url: string): Promise<void> {
 
     chrome.tabs.onUpdated.addListener(onUpdated);
     chrome.tabs.update(tabId, { url });
+  });
+}
+
+/**
+ * Reloads a tab and waits for the page to finish loading.
+ * Used to reset SPA state when URL-based navigation would be a no-op
+ * (e.g. after a demo that changed internal state without changing the URL).
+ */
+export async function reloadTab(tabId: number): Promise<void> {
+  return new Promise((resolve) => {
+    const onUpdated = (
+      updatedTabId: number,
+      changeInfo: chrome.tabs.TabChangeInfo,
+    ) => {
+      if (updatedTabId === tabId && changeInfo.status === 'complete') {
+        chrome.tabs.onUpdated.removeListener(onUpdated);
+        resolve();
+      }
+    };
+
+    chrome.tabs.onUpdated.addListener(onUpdated);
+    chrome.tabs.reload(tabId);
   });
 }

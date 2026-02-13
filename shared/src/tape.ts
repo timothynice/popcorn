@@ -1,4 +1,5 @@
 import type { DemoResult } from './results.js';
+import type { TestPlan } from './test-plan.js';
 
 export interface TapeRecord extends DemoResult {
   id: string;
@@ -7,4 +8,6 @@ export interface TapeRecord extends DemoResult {
   videoUrl?: string | null;
   /** Base64 data URL of a thumbnail screenshot. */
   thumbnailDataUrl?: string | null;
+  /** Stored test plan for re-run capability. */
+  testPlan?: TestPlan;
 }

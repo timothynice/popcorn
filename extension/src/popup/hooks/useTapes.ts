@@ -29,6 +29,7 @@ function toSharedTapeRecord(stored: StoredTapeRecord): SharedTapeRecord {
     timestamp: stored.timestamp,
     videoUrl,
     thumbnailDataUrl: stored.thumbnailDataUrl,
+    testPlan: stored.testPlan,
   };
 }
 

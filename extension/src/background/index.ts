@@ -9,7 +9,8 @@ import type { PopcornMessage, StartDemoMessage } from '@popcorn/shared';
 import { isPopcornMessage, createMessage } from '@popcorn/shared';
 import { initExternalMessaging } from './external-messaging.js';
 import { initBridgePolling, isHookConnected } from './bridge-client.js';
-import { runFullDemo } from './demo-flow.js';
+import { runFullDemo, reloadTab } from './demo-flow.js';
+import { captureScreenshot } from '../capture/screenshot.js';
 import { TapeStore } from '../storage/tape-store.js';
 import type { DemoState } from './state.js';
 
@@ -131,6 +132,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       case 'get_hook_status':
         sendResponse({ hookConnected: isHookConnected() });
         return false;
+      case 'capture_screenshot':
+        captureScreenshot()
+          .then((dataUrl) => sendResponse({ dataUrl }))
+          .catch((err) => sendResponse({ error: err instanceof Error ? err.message : String(err) }));
+        return true; // Keep channel open for async response
+      case 'rerun_with_recording':
+        handleRerunWithRecording(message.payload?.tapeId)
+          .then((result) => sendResponse({ success: true, result }))
+          .catch((err) => sendResponse({ success: false, error: err instanceof Error ? err.message : String(err) }));
+        return true; // Keep channel open for async response
       default:
         return false;
     }
@@ -169,6 +180,84 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 /**
+ * Re-runs a previously saved demo with video recording enabled.
+ * Called from the popup when the user clicks "Re-run with Recording" —
+ * the button click provides the user gesture needed for tabCapture.
+ */
+async function handleRerunWithRecording(tapeId: string) {
+  if (!tapeId) {
+    throw new Error('No tape ID provided for re-run');
+  }
+
+  await ensureTapeStore();
+
+  const tape = await tapeStore.get(tapeId);
+  if (!tape) {
+    throw new Error(`Tape not found: ${tapeId}`);
+  }
+
+  if (!tape.testPlan) {
+    throw new Error('Tape does not have a stored test plan for re-run');
+  }
+
+  console.log(`[Popcorn] Re-running demo "${tape.testPlanId}" with recording`);
+
+  updateStatus('recording');
+
+  // Get the active tab
+  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tabs[0]?.id) {
+    broadcastStatus('error', 'No active tab found');
+    throw new Error('No active tab found');
+  }
+
+  const tabId = tabs[0].id;
+
+  // Force reload to ensure fresh app state before re-run.
+  // Without this, the app stays at whatever state the previous demo left it
+  // (e.g. slide 4 after 3 ArrowRight keypresses).
+  try {
+    await reloadTab(tabId);
+    console.log('[Popcorn] Tab reloaded for fresh re-run state');
+  } catch (err) {
+    console.warn(
+      '[Popcorn] Failed to reload tab before re-run:',
+      err instanceof Error ? err.message : String(err),
+    );
+  }
+
+  // Build a StartDemoMessage from the stored plan
+  const message: StartDemoMessage = {
+    type: 'start_demo',
+    payload: {
+      testPlanId: tape.testPlanId,
+      testPlan: tape.testPlan,
+      acceptanceCriteria: [],
+      triggeredBy: 'popup-rerun',
+    },
+    timestamp: Date.now(),
+  };
+
+  try {
+    // Run with recording enabled (user gesture available from popup click)
+    const demoResult = await runFullDemo(message, tabId, {
+      tapeStore,
+      onTapeSaved: notifyTapeSaved,
+      skipRecording: false,
+    });
+
+    updateStatus('complete');
+    setTimeout(() => updateStatus('idle'), 3000);
+
+    return createMessage('demo_result', demoResult);
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    updateStatus('error', errorMsg);
+    throw error;
+  }
+}
+
+/**
  * Handles an incoming start_demo message by:
  * 1. Finding the active tab
  * 2. Navigating to the base URL if specified
@@ -196,19 +285,32 @@ async function handleStartDemoMessage(
   const tabId = tabs[0].id;
   const currentUrl = tabs[0].url;
 
-  // Only navigate if baseUrl is specified AND differs from the current URL
+  // Decide whether to navigate:
+  // 1. If active tab is already on an http(s) page → run in place (no navigation needed)
+  // 2. If active tab is NOT on http(s) → navigate to the test plan's baseUrl as fallback
+  const currentIsHttp = currentUrl?.startsWith('http://') || currentUrl?.startsWith('https://');
   const targetUrl = message.payload.testPlan.baseUrl;
-  if (targetUrl && targetUrl !== currentUrl) {
-    console.log(`[Popcorn] Navigating to ${targetUrl}`);
+
+  if (currentIsHttp) {
+    console.log(`[Popcorn] Active tab already on ${currentUrl} — running demo in place`);
+  } else if (targetUrl && (targetUrl.startsWith('http://') || targetUrl.startsWith('https://'))) {
+    console.log(`[Popcorn] Active tab not on a web page, navigating to ${targetUrl}`);
     await chrome.tabs.update(tabId, { url: targetUrl });
-    // Wait for page to load
     await new Promise((resolve) => setTimeout(resolve, 2000));
+  } else {
+    broadcastStatus('error', 'No web page open — open your app or set baseUrl in popcorn.config.json');
+    throw new Error('No web page open and no valid baseUrl configured');
   }
 
   try {
-    // Run the full demo pipeline (use updateStatus to avoid sending messages
-    // to the offscreen document which could interfere with recording)
-    const demoResult = await runFullDemo(message, tabId, { tapeStore, onTapeSaved: notifyTapeSaved });
+    // Run the full demo pipeline. Skip recording for hook-triggered demos
+    // (no user gesture available for tabCapture). Use updateStatus to avoid
+    // sending messages to the offscreen document.
+    const demoResult = await runFullDemo(message, tabId, {
+      tapeStore,
+      onTapeSaved: notifyTapeSaved,
+      skipRecording: true,
+    });
 
     updateStatus('complete');
 

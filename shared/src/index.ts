@@ -50,6 +50,8 @@ export {
 
 export type { TapeRecord } from './tape.js';
 
+export { generateTapeName } from './tape-name.js';
+
 export type { ValidationResult } from './bridge.js';
 
 export {

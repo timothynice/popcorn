@@ -8,9 +8,21 @@ interface StatusBarProps {
   error: string | null;
   hookConnected: boolean;
   onSettingsClick: () => void;
+  /** When true, show a back button instead of the status dot + text. */
+  showBack?: boolean;
+  /** Callback fired when the back button is clicked. */
+  onBack?: () => void;
 }
 
-export function StatusBar({ status, connected, error, hookConnected, onSettingsClick }: StatusBarProps) {
+export function StatusBar({
+  status,
+  connected,
+  error,
+  hookConnected,
+  onSettingsClick,
+  showBack,
+  onBack,
+}: StatusBarProps) {
   const getStatusText = () => {
     if (error) return error;
     if (!connected) return 'Disconnected';
@@ -35,10 +47,21 @@ export function StatusBar({ status, connected, error, hookConnected, onSettingsC
 
   return (
     <div className={styles.bar}>
-      <div className={styles.statusGroup}>
-        <span className={`${styles.dot} ${getStatusClass()}`} />
-        <span className={styles.statusText}>{getStatusText()}</span>
-      </div>
+      {showBack && onBack ? (
+        <button
+          type="button"
+          className={styles.backButton}
+          onClick={onBack}
+          aria-label="Back to feed"
+        >
+          {'\u2190'} Back
+        </button>
+      ) : (
+        <div className={styles.statusGroup}>
+          <span className={`${styles.dot} ${getStatusClass()}`} />
+          <span className={styles.statusText}>{getStatusText()}</span>
+        </div>
+      )}
       <div className={styles.hookIndicator}>
         <span className={`${styles.hookDot} ${hookConnected ? styles.hookConnected : styles.hookDisconnected}`} />
         <span className={styles.hookLabel}>Hook</span>

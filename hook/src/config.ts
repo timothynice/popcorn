@@ -22,6 +22,8 @@ export interface PopcornConfig {
   popcornMarker: string;
   /** Preferred starting port for the HTTP bridge server. Default: 7890 */
   bridgePort?: number;
+  /** Base URL for the dev server (e.g. "http://localhost:3000"). Used to resolve relative URLs in test plans. */
+  baseUrl?: string;
 }
 
 /**

@@ -53,7 +53,7 @@ export async function executeAction(step: TestStep): Promise<StepResult> {
       case 'screenshot':
         result = step.name === 'multi-state-discovery'
           ? await handleMultiStateDiscovery(step)
-          : { passed: true }; // Regular screenshot handled by orchestrator
+          : await handleScreenshot(step);
         break;
       case 'drag':
       case 'upload':
@@ -473,6 +473,16 @@ async function handleMultiStateDiscovery(_step: TestStep): Promise<ActionResult>
       discoveredControls,
       statesVisited,
     },
+  };
+}
+
+async function handleScreenshot(_step: TestStep): Promise<ActionResult> {
+  // Return a marker — the background will capture the screenshot after
+  // receiving results, avoiding nested Chrome messaging issues where
+  // captureVisibleTab responses get lost during content script execution.
+  return {
+    passed: true,
+    metadata: { needsBackgroundScreenshot: true },
   };
 }
 

@@ -8,6 +8,7 @@
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { generatePlanFromFile, savePlan } from '../plan-generator.js';
 
 export interface InitResult {
@@ -58,18 +59,32 @@ const EXAMPLE_PLAN = {
   tags: ['login', 'authentication'],
 };
 
-/** Hook configuration for .claude/settings.local.json. */
-const HOOK_CONFIG = {
-  matcher: 'Edit|Write',
-  hooks: [
-    {
-      type: 'command',
-      command: 'node --loader ts-node/esm hook/src/claude-hook-runner.ts',
-      timeout: 30,
-      async: true,
-    },
-  ],
-};
+/**
+ * Resolves the absolute path to the compiled hook runner script.
+ * Uses import.meta.url to locate this file, then navigates to the
+ * sibling claude-hook-runner.js in the dist/ directory.
+ */
+function resolveHookRunnerPath(): string {
+  const thisFile = fileURLToPath(import.meta.url);
+  const distDir = path.dirname(path.dirname(thisFile));
+  return path.resolve(distDir, 'claude-hook-runner.js');
+}
+
+/** Builds hook configuration for .claude/settings.local.json with absolute path. */
+function buildHookConfig(): Record<string, unknown> {
+  const hookRunnerPath = resolveHookRunnerPath();
+  return {
+    matcher: 'Edit|Write',
+    hooks: [
+      {
+        type: 'command',
+        command: `node ${hookRunnerPath}`,
+        timeout: 30,
+        async: true,
+      },
+    ],
+  };
+}
 
 /**
  * Scans the project root for common frontend directories.
@@ -129,7 +144,11 @@ export async function runInit(projectRoot: string): Promise<InitResult> {
   // 3. Create popcorn.config.json
   const configPath = path.resolve(projectRoot, 'popcorn.config.json');
   if (!(await fileExists(configPath))) {
-    const config = { watchDir, testPlansDir: 'test-plans' };
+    const config = {
+      watchDir,
+      testPlansDir: 'test-plans',
+      baseUrl: 'http://localhost:3000',
+    };
     await fs.writeFile(configPath, JSON.stringify(config, null, 2) + '\n');
     result.created.push('popcorn.config.json');
   } else {
@@ -240,11 +259,11 @@ async function mergeClaudeSettings(
     }
 
     // Append to existing PostToolUse array
-    postToolUse.push(HOOK_CONFIG);
+    postToolUse.push(buildHookConfig());
     result.modified.push('.claude/settings.local.json');
   } else {
     // Create PostToolUse
-    (hooks as Record<string, unknown>).PostToolUse = [HOOK_CONFIG];
+    (hooks as Record<string, unknown>).PostToolUse = [buildHookConfig()];
     settings.hooks = hooks;
     result.created.push('.claude/settings.local.json');
   }

@@ -351,7 +351,7 @@ describe('actions', () => {
     expect(elapsed).toBeGreaterThanOrEqual(90); // Allow some slack
   });
 
-  it('screenshot action returns success', async () => {
+  it('screenshot action returns marker for background capture', async () => {
     const step: TestStep = {
       stepNumber: 1,
       action: 'screenshot',
@@ -361,6 +361,7 @@ describe('actions', () => {
     const result = await executeAction(step);
 
     expect(result.passed).toBe(true);
+    expect(result.metadata?.needsBackgroundScreenshot).toBe(true);
   });
 
   it('screenshot with multi-state-discovery name discovers navigation controls', async () => {
@@ -385,7 +386,7 @@ describe('actions', () => {
     expect(result.metadata!.discoveredControls).toBeGreaterThan(0);
   });
 
-  it('screenshot without multi-state-discovery still returns simple success', async () => {
+  it('screenshot returns needsBackgroundScreenshot marker', async () => {
     const step: TestStep = {
       stepNumber: 1,
       action: 'screenshot',
@@ -395,7 +396,8 @@ describe('actions', () => {
     const result = await executeAction(step);
 
     expect(result.passed).toBe(true);
-    expect(result.metadata).toBeUndefined();
+    expect(result.metadata).toBeDefined();
+    expect(result.metadata!.needsBackgroundScreenshot).toBe(true);
   });
 
   it('handles fallback selector', async () => {

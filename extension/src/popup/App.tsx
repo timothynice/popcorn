@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { StatusBar } from './components/StatusBar';
-import { HeroCard } from './components/HeroCard';
 import { TapeList } from './components/TapeList';
 import { TapeDetail } from './components/TapeDetail';
 import { SettingsPanel } from './components/SettingsPanel';
@@ -36,8 +35,6 @@ function App() {
 
   // Sort tapes by timestamp descending (most recent first)
   const sortedTapes = [...tapes].sort((a, b) => b.timestamp - a.timestamp);
-  const latestTape = sortedTapes[0] ?? null;
-  const olderTapes = sortedTapes.slice(1);
 
   const handleTapeClick = (tapeId: string) => {
     selectTape(tapeId);
@@ -68,6 +65,18 @@ function App() {
     }
   };
 
+  /** Re-run a tape with video recording from the list view. */
+  const handleRerun = async (tapeId: string) => {
+    try {
+      await chrome.runtime.sendMessage({
+        type: 'rerun_with_recording',
+        payload: { tapeId },
+      });
+    } catch (err) {
+      console.warn('[Popcorn] Re-run from card failed:', err);
+    }
+  };
+
   /** Run a manual demo with given criteria. */
   const handleRunManualDemo = async (criteria: string[]) => {
     const plan = buildQuickTestPlan();
@@ -94,21 +103,31 @@ function App() {
       );
     }
 
+    // Check if the last error was about no web page open
+    const showNoPageWarning = extensionError?.includes('No web page open');
+
     // Feed view (default)
     return (
       <div className={styles.feed}>
-        {latestTape && (
-          <HeroCard
-            tape={latestTape}
-            onClick={() => handleTapeClick(latestTape.id)}
-          />
+        {showNoPageWarning && (
+          <div className={styles.warningBanner}>
+            <span className={styles.warningIcon}>!</span>
+            <div className={styles.warningContent}>
+              <p className={styles.warningTitle}>No app tab detected</p>
+              <p className={styles.warningText}>
+                Open your app in Chrome and keep its tab active before triggering a demo.
+                Alternatively, set <code>baseUrl</code> in <code>popcorn.config.json</code> to auto-navigate.
+              </p>
+            </div>
+          </div>
         )}
         <TapeList
-          tapes={olderTapes}
+          tapes={sortedTapes}
           isLoading={isLoading}
           error={tapesError}
           selectedTapeId={selectedTapeId}
           onSelectTape={handleTapeClick}
+          onRerun={handleRerun}
         />
       </div>
     );
@@ -123,6 +142,8 @@ function App() {
           error={extensionError}
           hookConnected={hookConnected}
           onSettingsClick={() => setCurrentView('settings')}
+          showBack={currentView === 'detail'}
+          onBack={handleBackToFeed}
         />
       )}
       <main className={styles.main}>

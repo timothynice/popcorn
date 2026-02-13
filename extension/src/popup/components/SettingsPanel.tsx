@@ -77,6 +77,9 @@ export function SettingsPanel({
               {hookConnected ? 'Connected' : 'Waiting for hook...'}
             </span>
           </div>
+          <p className={styles.statusHint}>
+            Demos run on the active tab. Make sure your app is open in Chrome before triggering a demo. You can set <code>baseUrl</code> in <code>popcorn.config.json</code> as a fallback.
+          </p>
         </section>
       </div>
     </div>

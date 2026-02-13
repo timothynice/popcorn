@@ -7,7 +7,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { StartDemoMessage, TestPlan, DemoResult } from '@popcorn/shared';
 import { createMessage } from '@popcorn/shared';
-import { runFullDemo } from '../background/demo-flow.js';
+import { runFullDemo, reloadTab } from '../background/demo-flow.js';
 import type { DemoFlowDeps } from '../background/demo-flow.js';
 
 // Mock the offscreen manager so Recorder doesn't actually create documents
@@ -22,6 +22,7 @@ const chromeMock = {
     sendMessage: vi.fn(),
     query: vi.fn(),
     update: vi.fn(),
+    reload: vi.fn(),
     get: vi.fn(() => Promise.resolve({ url: '' })),
     captureVisibleTab: vi.fn(),
     onUpdated: {
@@ -228,6 +229,18 @@ describe('demo-flow', () => {
         }
       }, 0);
       return Promise.resolve({});
+    });
+
+    // Make chrome.tabs.reload trigger the onUpdated listener with 'complete'
+    // so reloadTab resolves. Same pattern as chrome.tabs.update above.
+    chromeMock.tabs.reload.mockImplementation((_tabId: number) => {
+      setTimeout(() => {
+        const listeners = chromeMock.tabs.onUpdated.addListener.mock.calls;
+        for (const [listener] of listeners) {
+          listener(_tabId, { status: 'complete' });
+        }
+      }, 0);
+      return Promise.resolve();
     });
   });
 
@@ -476,5 +489,181 @@ describe('demo-flow', () => {
     const savedTape = store.save.mock.calls[0][0];
     expect(savedTape.videoBlob).toBeInstanceOf(Blob);
     expect(savedTape.videoBlob.size).toBeGreaterThan(0);
+  });
+
+  it('skips recording when skipRecording is true', async () => {
+    mockRecordingAvailable();
+    const { store } = createMockTapeStore();
+
+    chromeMock.tabs.sendMessage.mockResolvedValue({
+      results: [
+        {
+          stepNumber: 1,
+          action: 'click',
+          description: 'Click button',
+          passed: true,
+          duration: 50,
+          timestamp: Date.now(),
+        },
+      ],
+    });
+
+    chromeMock.tabs.captureVisibleTab.mockImplementation((_opts: any, cb: Function) => {
+      cb('data:image/png;base64,thumb');
+    });
+
+    const message = createStartDemoMessage();
+    const result = await runFullDemo(message, 1, {
+      tapeStore: store,
+      skipRecording: true,
+    });
+
+    expect(result.passed).toBe(true);
+    // Recording should NOT have been attempted
+    expect(chromeMock.tabCapture.getMediaStreamId).not.toHaveBeenCalled();
+    expect(result.videoMetadata).toBeNull();
+  });
+
+  it('saves testPlan in tape record', async () => {
+    const { store } = createMockTapeStore();
+
+    chromeMock.tabs.sendMessage.mockResolvedValue({
+      results: [
+        {
+          stepNumber: 1,
+          action: 'click',
+          description: 'Click button',
+          passed: true,
+          duration: 50,
+          timestamp: Date.now(),
+        },
+      ],
+    });
+
+    chromeMock.tabs.captureVisibleTab.mockImplementation((_opts: any, cb: Function) => {
+      cb('data:image/png;base64,thumb');
+    });
+
+    const message = createStartDemoMessage();
+    await runFullDemo(message, 1, { tapeStore: store });
+
+    expect(store.save).toHaveBeenCalledOnce();
+    const savedTape = store.save.mock.calls[0][0];
+    expect(savedTape.testPlan).toBeDefined();
+    expect(savedTape.testPlan.planName).toBe('test-plan');
+    expect(savedTape.testPlan.steps).toHaveLength(1);
+  });
+
+  it('includes screenshots in result when screenshot steps return data', async () => {
+    const { store } = createMockTapeStore();
+
+    chromeMock.tabs.sendMessage.mockResolvedValue({
+      results: [
+        {
+          stepNumber: 1,
+          action: 'click',
+          description: 'Click button',
+          passed: true,
+          duration: 50,
+          timestamp: Date.now(),
+        },
+        {
+          stepNumber: 2,
+          action: 'screenshot',
+          description: 'Capture final state',
+          passed: true,
+          duration: 100,
+          timestamp: Date.now(),
+          screenshotDataUrl: 'data:image/png;base64,screenshotdata',
+        },
+      ],
+    });
+
+    chromeMock.tabs.captureVisibleTab.mockImplementation((_opts: any, cb: Function) => {
+      cb('data:image/png;base64,thumb');
+    });
+
+    const message = createStartDemoMessage();
+    const result = await runFullDemo(message, 1, { tapeStore: store });
+
+    expect(result.passed).toBe(true);
+    expect(result.screenshots).toHaveLength(1);
+    expect(result.screenshots[0].dataUrl).toBe('data:image/png;base64,screenshotdata');
+    expect(result.screenshots[0].stepNumber).toBe(2);
+  });
+
+  it('reloadTab calls chrome.tabs.reload and resolves on complete', async () => {
+    await reloadTab(42);
+
+    expect(chromeMock.tabs.reload).toHaveBeenCalledWith(42);
+    expect(chromeMock.tabs.onUpdated.addListener).toHaveBeenCalled();
+    expect(chromeMock.tabs.onUpdated.removeListener).toHaveBeenCalled();
+  });
+
+  it('reloads tab after saving tape to reset app state', async () => {
+    const { store } = createMockTapeStore();
+
+    chromeMock.tabs.sendMessage.mockResolvedValue({
+      results: [
+        {
+          stepNumber: 1,
+          action: 'click',
+          description: 'Click button',
+          passed: true,
+          duration: 50,
+          timestamp: Date.now(),
+        },
+      ],
+    });
+
+    chromeMock.tabs.captureVisibleTab.mockImplementation((_opts: any, cb: Function) => {
+      cb('data:image/png;base64,thumb');
+    });
+
+    const message = createStartDemoMessage();
+    await runFullDemo(message, 1, { tapeStore: store });
+
+    // Verify tab was reloaded after demo completed
+    expect(chromeMock.tabs.reload).toHaveBeenCalledWith(1);
+  });
+
+  it('captures screenshots from background for steps with needsBackgroundScreenshot marker', async () => {
+    const { store } = createMockTapeStore();
+
+    chromeMock.tabs.sendMessage.mockResolvedValue({
+      results: [
+        {
+          stepNumber: 1,
+          action: 'click',
+          description: 'Click button',
+          passed: true,
+          duration: 50,
+          timestamp: Date.now(),
+        },
+        {
+          stepNumber: 2,
+          action: 'screenshot',
+          description: 'Capture visual state',
+          passed: true,
+          duration: 0,
+          timestamp: Date.now(),
+          metadata: { needsBackgroundScreenshot: true },
+        },
+      ],
+    });
+
+    chromeMock.tabs.captureVisibleTab.mockImplementation((_opts: any, cb: Function) => {
+      cb('data:image/png;base64,captured');
+    });
+
+    const message = createStartDemoMessage();
+    const result = await runFullDemo(message, 1, { tapeStore: store });
+
+    expect(result.passed).toBe(true);
+    // captureVisibleTab called twice: once for the screenshot step, once for thumbnail
+    expect(chromeMock.tabs.captureVisibleTab).toHaveBeenCalledTimes(2);
+    expect(result.screenshots).toHaveLength(1);
+    expect(result.screenshots[0].dataUrl).toBe('data:image/png;base64,captured');
+    expect(result.screenshots[0].stepNumber).toBe(2);
   });
 });

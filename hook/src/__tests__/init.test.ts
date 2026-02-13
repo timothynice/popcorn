@@ -192,7 +192,7 @@ describe('runInit', () => {
     expect(result.created).toContain(loginPlan!.path);
   });
 
-  it('writes example plan when source files have no interactive elements', async () => {
+  it('generates visual-check plan when source files have no interactive elements', async () => {
     const srcDir = path.join(tmpDir, 'src', 'components');
     await fs.mkdir(srcDir, { recursive: true });
 
@@ -204,8 +204,10 @@ describe('runInit', () => {
 
     const result = await runInit(tmpDir);
 
-    expect(result.generatedPlans).toEqual([]);
-    expect(result.created).toContain('test-plans/example-login.json');
+    // Non-interactive files now get a visual-check plan instead of being skipped
+    expect(result.generatedPlans.length).toBe(1);
+    expect(result.generatedPlans[0].path).toContain('utils');
+    expect(result.generatedPlans[0].stepCount).toBe(2);
   });
 
   it('does not scan when test-plans/ already has JSON files', async () => {
@@ -263,7 +265,7 @@ describe('scanAndGeneratePlans', () => {
     expect(planFiles.some((f) => f.includes('signup'))).toBe(true);
   });
 
-  it('skips files without interactive elements', async () => {
+  it('generates plans for all files including non-interactive ones', async () => {
     const srcDir = path.join(tmpDir, 'src');
     await fs.mkdir(srcDir, { recursive: true });
     await fs.writeFile(path.join(srcDir, 'constants.ts'), 'export const API_URL = "/api";');
@@ -275,9 +277,10 @@ describe('scanAndGeneratePlans', () => {
     const testPlansDir = path.join(tmpDir, 'test-plans');
     const result = await scanAndGeneratePlans(tmpDir, 'src', testPlansDir);
 
-    // Only the form file should produce a plan
-    expect(result.length).toBe(1);
-    expect(result[0].path).toContain('contact-form');
+    // Both files produce plans (interactive gets full plan, non-interactive gets visual-check)
+    expect(result.length).toBe(2);
+    expect(result.some((p) => p.path.includes('contact-form'))).toBe(true);
+    expect(result.some((p) => p.path.includes('constants'))).toBe(true);
   });
 
   it('scans nested subdirectories', async () => {

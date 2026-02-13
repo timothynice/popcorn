@@ -6,6 +6,13 @@ export async function executeTestPlan(steps: TestStep[]): Promise<StepResult[]> 
 
   for (const step of steps) {
     const result = await executeAction(step);
+
+    // Promote screenshot data URL from metadata to the top-level field
+    // so the orchestrator's screenshot extraction logic can find it.
+    if (result.metadata?.screenshotDataUrl) {
+      result.screenshotDataUrl = result.metadata.screenshotDataUrl as string;
+    }
+
     results.push(result);
 
     // Stop on critical action errors (but not assertion failures)

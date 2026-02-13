@@ -54,7 +54,12 @@ async function main(): Promise<void> {
       console.log('  2. Create test plans in test-plans/ (or let Popcorn auto-generate them)');
     }
     console.log('  3. Install the Popcorn Chrome extension (load extension/dist/ unpacked)');
-    console.log('  4. Edit a file in your watch directory to trigger a demo');
+    console.log('  4. Open your app in Chrome and keep its tab active');
+    console.log('  5. Edit a file in your watch directory to trigger a demo');
+    console.log('');
+    console.log('  Tip: Popcorn runs demos on the active Chrome tab. Make sure your');
+    console.log('  app is open before triggering. If you want Popcorn to navigate');
+    console.log('  automatically, set "baseUrl" in popcorn.config.json (e.g. "http://localhost:3000").');
   } else {
     console.log('Usage: popcorn <command>\n');
     console.log('Commands:');

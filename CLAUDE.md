@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Popcorn is an autonomous UI testing tool combining a Chrome extension and a Claude Code hook. When the AI modifies frontend code, Popcorn automatically runs a visual demo in the browser, captures a video replay, and presents a structured summary. See `popcorn_prd.md` for the full product requirements.
 
-**Status:** Core implementation complete with HTTP bridge. All three packages (shared, extension, hook) are built with 275 passing tests across 22 test files. The hook communicates with the extension via an HTTP bridge server on localhost (ports 7890-7899), with file-based IPC as automatic fallback. The Chrome extension background polls the hook via `chrome.alarms` + `fetch()`, with hook connection status shown in the popup UI. A `popcorn init` CLI scaffolds new projects automatically.
+**Status:** Core implementation complete with HTTP bridge and route-aware visual testing. All three packages (shared, extension, hook) are built with 307 passing tests across 23 test files. The hook communicates with the extension via an HTTP bridge server on localhost (ports 7890-7899), with file-based IPC as automatic fallback. The Chrome extension background polls the hook via `chrome.alarms` + `fetch()`, with hook connection status shown in the popup UI. A `popcorn init` CLI scaffolds new projects automatically. Screenshots are captured automatically during demo runs; video recording requires a user gesture via the popup's "Re-run with Recording" button.
 
 ## Build & Development Commands
 
@@ -54,8 +54,8 @@ Claude Code Hook (hook/)          Chrome Extension (extension/)
 1. Hook detects file change in the configured watch directory
 2. Hook looks for a matching test plan in `test-plans/`; if none found, auto-generates one from the source code
 3. Hook enqueues a `start_demo` message on its HTTP bridge server (localhost:7890-7899). Extension's background service worker polls `GET /poll` via `chrome.alarms` + `fetch()` and receives the message. Falls back to file-based IPC (`.popcorn/outbox/`) if HTTP is unavailable.
-4. Extension executes operations rapidly (target: 5+ actions/sec), capturing screenshots in memory
-5. Extension records video via Offscreen API + tabCapture, stores locally in IndexedDB
+4. Background handles navigate/wait steps via `chrome.tabs.update`; remaining steps sent to content script for rapid execution
+5. Content script captures screenshots via `chrome.runtime.sendMessage` → background `captureVisibleTab`; video recording requires user gesture (available via popup "Re-run with Recording" button)
 6. Extension POSTs structured results (with step metadata) back to the hook via `POST /result` on the bridge server
 7. Hook evaluates acceptance criteria using pattern-matched evaluators (e.g., "redirects to /dashboard" checks actual URLs)
 8. AI parses results, decides whether to iterate or move on
@@ -80,7 +80,7 @@ Claude Code Hook (hook/)          Chrome Extension (extension/)
 
 ## Extension Permissions
 
-Only request: `activeTab`, `storage`, `scripting`, `tabCapture`, `alarms`. All recordings and test data stay local — no external API calls or cloud storage.
+Only request: `activeTab`, `storage`, `scripting`, `tabCapture`, `offscreen`, `alarms`. Uses `host_permissions` for `http://localhost/*`, `https://localhost/*`, `http://127.0.0.1/*` to enable programmatic `captureVisibleTab` and `scripting.executeScript`. All recordings and test data stay local — no external API calls or cloud storage.
 
 ## Key Modules
 
@@ -93,16 +93,17 @@ Only request: `activeTab`, `storage`, `scripting`, `tabCapture`, `alarms`. All r
 - `tape.ts` — `TapeRecord` type for stored recordings
 
 ### Extension
-- `content/actions.ts` — `executeAction()` dispatcher for all 14 action types, returns `ActionResult { passed, error?, metadata? }` with structured metadata (URLs, text content, assertion values)
-- `content/test-harness.ts` — `executeTestPlan()` batch executor, listens for `execute_plan` messages
+- `content/actions.ts` — `executeAction()` dispatcher for all 14 action types, returns `ActionResult { passed, error?, metadata? }` with structured metadata (URLs, text content, assertion values). Screenshot steps message background for `captureVisibleTab`.
+- `content/test-harness.ts` — `executeTestPlan()` batch executor, listens for `execute_plan` messages, promotes `screenshotDataUrl` from metadata
 - `background/state.ts` — State machine: idle → running → capturing → complete → error
-- `background/demo-orchestrator.ts` — `handleStartDemo()` orchestration, `assembleDemoResult()`
+- `background/demo-flow.ts` — `runFullDemo()` pipeline: handles navigate/wait steps in background, injects content script, executes plan, captures video (when `skipRecording` is false), saves tape with `testPlan` for re-run
+- `background/demo-orchestrator.ts` — `handleStartDemo()` orchestration, `assembleDemoResult()` (extracts screenshots from step results)
 - `background/external-messaging.ts` — `initExternalMessaging()` for Chrome external messaging
 - `background/bridge-client.ts` — `initBridgePolling()`, `discoverHookPort()`, `pollForMessages()`, `sendResult()` — polls hook HTTP server via `chrome.alarms` + `fetch()`
 - `capture/recorder.ts` — `Recorder` class (MediaRecorder + Offscreen API + tabCapture, vp9/vp8)
 - `capture/screenshot.ts` — `captureScreenshot()` via `chrome.tabs.captureVisibleTab`
-- `storage/tape-store.ts` — `TapeStore` (IndexedDB) + `MockTapeStore` (testing)
-- `popup/` — React dashboard with TapeList, TapeCard, TapeDetail, StatusBar, CriteriaEditor
+- `storage/tape-store.ts` — `TapeStore` (IndexedDB) + `MockTapeStore` (testing). `TapeRecord` includes optional `testPlan` for re-run capability.
+- `popup/` — React dashboard with TapeList, TapeCard, TapeDetail (with "Re-run with Recording" button), StatusBar, CriteriaEditor
 
 ### Hook
 - `watcher.ts` — `Watcher` class (chokidar, debounce, `// popcorn-test` marker detection)
@@ -119,11 +120,20 @@ Only request: `activeTab`, `storage`, `scripting`, `tabCapture`, `alarms`. All r
 
 ## Getting Started
 
+See `SETUP.md` for full installation and usage instructions.
+
+**One-time setup (Popcorn repo):**
 ```bash
-npx popcorn init    # Scaffolds test-plans/, popcorn.config.json, .claude/settings.local.json
+npm install && npm run build && npm link
 ```
 
-The `init` command auto-detects your frontend source directory, scans existing files for interactive elements (forms, inputs, buttons), and generates test plans automatically. If no interactive elements are found, it creates an example login plan as a starting point.
+**Per-project setup:**
+```bash
+cd ~/my-project
+popcorn init    # Scaffolds test-plans/, popcorn.config.json, .claude/settings.local.json
+```
+
+The `init` command auto-detects your frontend source directory, scans existing files for interactive elements (forms, inputs, buttons), and generates test plans automatically. If no interactive elements are found, it creates an example login plan as a starting point. The hook runner path in `.claude/settings.local.json` is resolved as an absolute path to the compiled `hook/dist/claude-hook-runner.js`.
 
 ## Workflow
 
