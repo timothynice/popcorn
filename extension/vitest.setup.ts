@@ -19,7 +19,12 @@ const chromeMock = {
     sendMessage: vi.fn(),
     query: vi.fn(),
     update: vi.fn(),
+    get: vi.fn(() => Promise.resolve({ url: '' })),
     captureVisibleTab: vi.fn(),
+    onUpdated: {
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+    },
   },
   tabCapture: {
     capture: vi.fn(),

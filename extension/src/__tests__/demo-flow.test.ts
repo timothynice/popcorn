@@ -22,7 +22,12 @@ const chromeMock = {
     sendMessage: vi.fn(),
     query: vi.fn(),
     update: vi.fn(),
+    get: vi.fn(() => Promise.resolve({ url: '' })),
     captureVisibleTab: vi.fn(),
+    onUpdated: {
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+    },
   },
   tabCapture: {
     getMediaStreamId: vi.fn(
@@ -211,6 +216,19 @@ describe('demo-flow', () => {
     chromeMock.runtime.lastError = null;
     // Default: recording unavailable
     mockRecordingUnavailable();
+
+    // Make chrome.tabs.update trigger the onUpdated listener with 'complete'
+    // so navigateTab resolves. This simulates Chrome's tab navigation lifecycle.
+    chromeMock.tabs.update.mockImplementation((_tabId: number, _updateProps: any) => {
+      // Fire the onUpdated listener asynchronously
+      setTimeout(() => {
+        const listeners = chromeMock.tabs.onUpdated.addListener.mock.calls;
+        for (const [listener] of listeners) {
+          listener(_tabId, { status: 'complete' });
+        }
+      }, 0);
+      return Promise.resolve({});
+    });
   });
 
   it('executes test plan and returns demo result', async () => {
@@ -400,7 +418,6 @@ describe('demo-flow', () => {
 
     chromeMock.tabs.sendMessage.mockResolvedValue({
       results: [
-        { stepNumber: 1, action: 'navigate', description: 'Go to page', passed: true, duration: 100, timestamp: Date.now() },
         { stepNumber: 2, action: 'click', description: 'Click', passed: true, duration: 50, timestamp: Date.now() },
       ],
     });
@@ -412,14 +429,19 @@ describe('demo-flow', () => {
     const message = createStartDemoMessage(plan);
     const result = await runFullDemo(message, 42, { tapeStore: store });
 
-    // Verify the content script was called with the right tab and plan
+    // Navigate step is handled by the background via chrome.tabs.update,
+    // so only the click step is sent to the content script
+    expect(chromeMock.tabs.update).toHaveBeenCalledWith(42, { url: '/page' });
     expect(chromeMock.tabs.sendMessage).toHaveBeenCalledWith(42, {
       type: 'execute_plan',
-      payload: { steps: plan.steps },
+      payload: {
+        steps: [
+          { stepNumber: 2, action: 'click', description: 'Click', selector: '#btn' },
+        ],
+      },
     });
 
     expect(result.testPlanId).toBe('custom-plan');
-    expect(result.steps).toHaveLength(2);
   });
 
   it('captures video when recording is available', async () => {

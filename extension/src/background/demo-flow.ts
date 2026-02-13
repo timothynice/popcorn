@@ -8,6 +8,7 @@ import type {
   StartDemoMessage,
   DemoResult,
   VideoMetadata,
+  TestStep,
 } from '@popcorn/shared';
 import { Recorder } from '../capture/recorder.js';
 import { captureScreenshot } from '../capture/screenshot.js';
@@ -55,8 +56,25 @@ export async function runFullDemo(
     );
   }
 
-  // 2. Ensure content script is injected (handles extension reload case
-  //    where existing tabs lose their content scripts)
+  // 2. Handle navigate steps from the background (content script can't
+  //    survive page navigation — setting window.location destroys its context).
+  //    We split off leading navigate/wait steps and handle them here, then
+  //    pass the remaining steps to the content script via the orchestrator.
+  const { navigateSteps, contentSteps } = splitNavigateSteps(testPlan.steps);
+
+  for (const step of navigateSteps) {
+    if (step.action === 'navigate' && step.target) {
+      console.log(`[Popcorn] Background navigating to: ${step.target}`);
+      await navigateTab(tabId, step.target);
+    } else if (step.action === 'wait') {
+      const waitMs = step.timeout || 1000;
+      console.log(`[Popcorn] Background waiting ${waitMs}ms`);
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
+    }
+  }
+
+  // 3. Ensure content script is injected (handles extension reload case
+  //    and post-navigation re-injection)
   try {
     await chrome.scripting.executeScript({
       target: { tabId },
@@ -69,10 +87,22 @@ export async function runFullDemo(
     );
   }
 
-  // 3. Execute the test plan via the orchestrator
+  // 4. Execute the remaining steps via the content script through the orchestrator.
+  //    We create a modified message with only the content-script-safe steps.
+  const contentMessage: StartDemoMessage = {
+    ...message,
+    payload: {
+      ...message.payload,
+      testPlan: {
+        ...testPlan,
+        steps: contentSteps,
+      },
+    },
+  };
+
   let demoResult: DemoResult;
   try {
-    demoResult = await handleStartDemo(message, tabId);
+    demoResult = await handleStartDemo(contentMessage, tabId);
   } catch (err) {
     // If execution fails, still try to stop the recorder
     if (recordingAvailable) {
@@ -86,7 +116,7 @@ export async function runFullDemo(
     throw err;
   }
 
-  // 4. Stop recording and collect video metadata
+  // 5. Stop recording and collect video metadata
   let videoMetadata: VideoMetadata | null = null;
   let videoBlob: Blob | null = null;
 
@@ -112,7 +142,7 @@ export async function runFullDemo(
     videoMetadata: videoMetadata ?? demoResult.videoMetadata,
   };
 
-  // 5. Capture a final screenshot for the tape thumbnail
+  // 6. Capture a final screenshot for the tape thumbnail
   let thumbnailDataUrl: string | null = null;
   try {
     thumbnailDataUrl = await captureScreenshot(tabId);
@@ -120,7 +150,7 @@ export async function runFullDemo(
     // Thumbnail is optional
   }
 
-  // 6. Save tape record
+  // 7. Save tape record
   try {
     const tapeData: Omit<TapeRecord, 'id'> = {
       demoName: testPlan.planName,
@@ -148,4 +178,74 @@ export async function runFullDemo(
   }
 
   return resultWithVideo;
+}
+
+/**
+ * Splits test plan steps into background-handled navigate/wait steps
+ * and content-script-safe steps. Navigate steps that use window.location
+ * destroy the content script context, so we handle them from the background
+ * using chrome.tabs.update instead.
+ *
+ * Splits at the boundary: all leading navigate/wait steps go to the
+ * background; everything from the first non-navigate/non-wait step
+ * onward goes to the content script.
+ */
+function splitNavigateSteps(steps: TestStep[]): {
+  navigateSteps: TestStep[];
+  contentSteps: TestStep[];
+} {
+  const navigateSteps: TestStep[] = [];
+  let splitIndex = 0;
+
+  for (const step of steps) {
+    if (step.action === 'navigate' || step.action === 'wait') {
+      navigateSteps.push(step);
+      splitIndex++;
+    } else {
+      break;
+    }
+  }
+
+  return {
+    navigateSteps,
+    contentSteps: steps.slice(splitIndex),
+  };
+}
+
+/**
+ * Navigates a tab to a URL using chrome.tabs.update and waits for the
+ * page to finish loading. This is the safe way to navigate — unlike
+ * setting window.location in a content script, this doesn't destroy
+ * the content script execution context.
+ *
+ * If the tab is already at the target URL (ignoring trailing slashes),
+ * the navigation is skipped to avoid an unnecessary reload.
+ */
+async function navigateTab(tabId: number, url: string): Promise<void> {
+  // Check if already at the target URL — skip navigation if so
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    const normalise = (u: string) => u.replace(/\/+$/, '');
+    if (tab.url && normalise(tab.url) === normalise(url)) {
+      console.log(`[Popcorn] Tab already at ${url}, skipping navigation`);
+      return;
+    }
+  } catch {
+    // If we can't get tab info, proceed with navigation
+  }
+
+  return new Promise((resolve) => {
+    const onUpdated = (
+      updatedTabId: number,
+      changeInfo: chrome.tabs.TabChangeInfo,
+    ) => {
+      if (updatedTabId === tabId && changeInfo.status === 'complete') {
+        chrome.tabs.onUpdated.removeListener(onUpdated);
+        resolve();
+      }
+    };
+
+    chrome.tabs.onUpdated.addListener(onUpdated);
+    chrome.tabs.update(tabId, { url });
+  });
 }
