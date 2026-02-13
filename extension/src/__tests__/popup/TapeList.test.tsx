@@ -80,9 +80,9 @@ describe('TapeList', () => {
       />,
     );
 
-    expect(screen.getByText('No tapes yet.')).toBeInTheDocument();
+    expect(screen.getByText('No tapes yet')).toBeInTheDocument();
     expect(
-      screen.getByText('Modify a frontend file to trigger a demo.'),
+      screen.getByText('Modify a frontend file to trigger a demo, or use the settings panel to run one manually.'),
     ).toBeInTheDocument();
   });
 

@@ -19,8 +19,10 @@
 
 import path from 'node:path';
 import fs from 'node:fs';
-import { loadConfig } from './config.js';
+import { loadConfigFromFile } from './config.js';
 import { loadTestPlan, listTestPlans } from './plan-loader.js';
+import { generatePlanFromFile, savePlan } from './plan-generator.js';
+import { loadCriteria } from './criteria-loader.js';
 import { ExtensionClient } from './extension-client.js';
 import { createLogger } from './logger.js';
 import {
@@ -66,7 +68,7 @@ async function main(): Promise<void> {
   }
 
   const projectRoot = process.cwd();
-  const config = loadConfig();
+  const config = await loadConfigFromFile(projectRoot);
 
   // Check if the file is in the watched directory
   const watchDir = path.resolve(projectRoot, config.watchDir);
@@ -96,16 +98,28 @@ async function main(): Promise<void> {
   // Find a matching test plan
   const testPlansDir = path.resolve(projectRoot, config.testPlansDir);
   const baseName = path.basename(filePath, path.extname(filePath));
-  const planName = await findMatchingPlan(baseName, testPlansDir);
+  let planName = await findMatchingPlan(baseName, testPlansDir);
 
   if (!planName) {
-    log.info(`No matching test plan for '${baseName}', skipping demo`);
-    return;
+    log.info(`No matching test plan for '${baseName}', generating one...`);
+
+    const generatedPlan = await generatePlanFromFile(absFilePath, {
+      baseUrl: '/',
+    });
+
+    if (!generatedPlan) {
+      log.info(`No interactive elements detected in '${baseName}', skipping`);
+      return;
+    }
+
+    const savedPath = await savePlan(generatedPlan, testPlansDir);
+    log.info(`Generated test plan saved: ${savedPath}`);
+    planName = generatedPlan.planName;
   }
 
-  // Load the test plan
+  // Load the test plan and its criteria
   const testPlan = await loadTestPlan(planName, testPlansDir);
-  const acceptanceCriteria = ['All steps pass'];
+  const acceptanceCriteria = await loadCriteria(planName, testPlansDir);
 
   log.info(`Dispatching test plan '${planName}'`, {
     triggeredBy: filePath,

@@ -7,6 +7,8 @@ export interface StepResult {
   error?: string;
   screenshotDataUrl?: string;
   timestamp: number;
+  /** Optional structured metadata populated by action handlers (e.g., URLs, assertion values). */
+  metadata?: Record<string, unknown>;
 }
 
 export interface ScreenshotCapture {

@@ -1,5 +1,8 @@
-import { describe, it, expect } from 'vitest';
-import { getDefaultConfig, loadConfig } from '../config.js';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import os from 'node:os';
+import { getDefaultConfig, loadConfig, loadConfigFromFile } from '../config.js';
 
 describe('getDefaultConfig', () => {
   it('returns expected default values', () => {
@@ -11,6 +14,7 @@ describe('getDefaultConfig', () => {
     expect(config.ignorePatterns).toEqual(['node_modules', '.git', 'dist']);
     expect(config.testPlansDir).toBe('test-plans');
     expect(config.popcornMarker).toBe('// popcorn-test');
+    expect(config.bridgePort).toBe(7890);
   });
 
   it('returns a new object on each call', () => {
@@ -51,6 +55,7 @@ describe('loadConfig', () => {
     expect(config.ignorePatterns).toEqual(['node_modules', '.git', 'dist']);
     expect(config.testPlansDir).toBe('test-plans');
     expect(config.popcornMarker).toBe('// popcorn-test');
+    expect(config.bridgePort).toBe(7890);
   });
 
   it('allows overriding extensions', () => {
@@ -66,6 +71,7 @@ describe('loadConfig', () => {
       ignorePatterns: ['build'],
       testPlansDir: 'plans',
       popcornMarker: '// test-ui',
+      bridgePort: 9999,
     });
 
     expect(config.watchDir).toBe('a');
@@ -74,5 +80,62 @@ describe('loadConfig', () => {
     expect(config.ignorePatterns).toEqual(['build']);
     expect(config.testPlansDir).toBe('plans');
     expect(config.popcornMarker).toBe('// test-ui');
+    expect(config.bridgePort).toBe(9999);
+  });
+});
+
+describe('loadConfigFromFile', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'popcorn-config-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('reads from popcorn.config.json and merges with defaults', async () => {
+    await fs.writeFile(
+      path.join(tmpDir, 'popcorn.config.json'),
+      JSON.stringify({ watchDir: 'src/components', debounceMs: 500 }),
+    );
+
+    const config = await loadConfigFromFile(tmpDir);
+    expect(config.watchDir).toBe('src/components');
+    expect(config.debounceMs).toBe(500);
+    // Defaults preserved for unspecified fields
+    expect(config.extensions).toEqual(['.js', '.ts', '.jsx', '.tsx']);
+    expect(config.testPlansDir).toBe('test-plans');
+  });
+
+  it('falls back to defaults when file is missing', async () => {
+    const config = await loadConfigFromFile(tmpDir);
+    expect(config).toEqual(getDefaultConfig());
+  });
+
+  it('applies overrides on top of file config', async () => {
+    await fs.writeFile(
+      path.join(tmpDir, 'popcorn.config.json'),
+      JSON.stringify({ watchDir: 'from-file', debounceMs: 500 }),
+    );
+
+    const config = await loadConfigFromFile(tmpDir, { watchDir: 'from-override' });
+    expect(config.watchDir).toBe('from-override'); // override wins
+    expect(config.debounceMs).toBe(500); // file value preserved
+  });
+
+  it('handles invalid JSON gracefully', async () => {
+    await fs.writeFile(path.join(tmpDir, 'popcorn.config.json'), 'not valid json{{{');
+
+    const config = await loadConfigFromFile(tmpDir);
+    expect(config).toEqual(getDefaultConfig());
+  });
+
+  it('ignores non-object JSON values', async () => {
+    await fs.writeFile(path.join(tmpDir, 'popcorn.config.json'), '"a string"');
+
+    const config = await loadConfigFromFile(tmpDir);
+    expect(config).toEqual(getDefaultConfig());
   });
 });

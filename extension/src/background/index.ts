@@ -8,6 +8,7 @@
 import type { PopcornMessage, StartDemoMessage } from '@popcorn/shared';
 import { isPopcornMessage, createMessage } from '@popcorn/shared';
 import { initExternalMessaging } from './external-messaging.js';
+import { initBridgePolling, isHookConnected } from './bridge-client.js';
 import { runFullDemo } from './demo-flow.js';
 import { TapeStore } from '../storage/tape-store.js';
 import type { DemoState } from './state.js';
@@ -85,10 +86,36 @@ function notifyTapeSaved(tapeId: string): void {
   });
 }
 
+/** Bridge message handler for HTTP polling. */
+async function handleBridgeMessage(rawMessage: unknown): Promise<unknown> {
+  if (!rawMessage || typeof rawMessage !== 'object') return null;
+  const msg = rawMessage as Record<string, unknown>;
+
+  if (msg.type === 'start_demo' && msg.payload && msg.timestamp) {
+    try {
+      const result = await handleStartDemoMessage(
+        rawMessage as StartDemoMessage,
+        {} as chrome.runtime.MessageSender,
+      );
+      return result;
+    } catch (err) {
+      console.error('[Popcorn] Bridge demo failed:', err);
+      return null;
+    }
+  }
+
+  if (msg.type === 'hook_ready') {
+    console.log('[Popcorn] Hook connected via bridge:', msg.payload);
+    return createMessage('extension_ready', { extensionVersion: '0.1.0' });
+  }
+
+  return null;
+}
+
 // -- Initialize external messaging for hook communication --
 initExternalMessaging();
-
-console.log('[Popcorn] Background script loaded');
+initBridgePolling(handleBridgeMessage);
+console.log('[Popcorn] Background script loaded, bridge polling initialized');
 
 // -- Listen for internal messages (from popup or content script relay) --
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -100,6 +127,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return false;
       case 'ping':
         sendResponse({ pong: true });
+        return false;
+      case 'get_hook_status':
+        sendResponse({ hookConnected: isHookConnected() });
         return false;
       default:
         return false;

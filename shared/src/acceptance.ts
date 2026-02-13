@@ -72,24 +72,233 @@ export function completedWithinDuration(maxMs: number): AcceptanceCriterion {
   };
 }
 
+/**
+ * A pattern definition that maps a regex against criterion text to a
+ * specific evaluator factory.  Patterns are checked in priority order;
+ * the first match wins.
+ */
+interface CriterionPattern {
+  /** Regex tested against the criterion line (case-insensitive). */
+  regex: RegExp;
+  /** Build the appropriate evaluator from the regex match. */
+  build: (match: RegExpMatchArray, line: string, index: number) => AcceptanceCriterion;
+}
+
+const CRITERION_PATTERNS: CriterionPattern[] = [
+  // ── Duration / performance ───────────────────────────────────────────
+  // "within 500ms", "under 2 seconds", "completes in 1s"
+  {
+    regex: /(?:within|under|in|less than)\s+(\d+(?:\.\d+)?)\s*(ms|milliseconds?|seconds?|sec|s)\b/i,
+    build(match, line, i) {
+      const value = parseFloat(match[1]);
+      const unit = match[2].toLowerCase();
+      const ms = unit.startsWith('ms') || unit.startsWith('millis') ? value : value * 1000;
+      return {
+        ...completedWithinDuration(ms),
+        id: `custom-${i}`,
+        description: line,
+      };
+    },
+  },
+
+  // ── URL redirect / navigation ────────────────────────────────────────
+  // "redirects to /dashboard", "navigates to /home", "URL contains /settings"
+  {
+    regex: /(?:redirects?\s+to|navigates?\s+to|url\s+(?:contains?|includes?))\s+(\S+)/i,
+    build(match, line, i) {
+      const expectedPath = match[1];
+      return {
+        id: `custom-${i}`,
+        description: line,
+        type: 'functional' as const,
+        evaluate(stepResults: StepResult[]) {
+          // Search step metadata in reverse for the latest URL info
+          for (let j = stepResults.length - 1; j >= 0; j--) {
+            const meta = stepResults[j].metadata;
+            if (meta) {
+              const finalUrl = (meta.finalUrl as string) ?? (meta.actualUrl as string);
+              if (finalUrl && finalUrl.includes(expectedPath)) {
+                return {
+                  criterionId: `custom-${i}`,
+                  passed: true,
+                  message: `Redirected to ${finalUrl} (contains "${expectedPath}")`,
+                };
+              }
+            }
+          }
+          return {
+            criterionId: `custom-${i}`,
+            passed: false,
+            message: `Expected redirect to "${expectedPath}" not found in step metadata`,
+          };
+        },
+      };
+    },
+  },
+
+  // ── Error message display ────────────────────────────────────────────
+  // "shows error message", "displays error", "error is shown"
+  {
+    regex: /(?:shows?|displays?|renders?|presents?)\s+(?:an?\s+)?error/i,
+    build(_match, line, i) {
+      return {
+        id: `custom-${i}`,
+        description: line,
+        type: 'functional' as const,
+        evaluate(stepResults: StepResult[]) {
+          // Look for assert steps that checked for error-related content
+          const hasErrorCheck = stepResults.some((s) => {
+            if (s.action === 'assert' && s.passed) {
+              const meta = s.metadata;
+              if (meta) {
+                const text = ((meta.actualText as string) ?? '').toLowerCase();
+                return text.includes('error') || text.includes('invalid') || text.includes('fail');
+              }
+            }
+            return false;
+          });
+
+          // Also pass if any step has error-related metadata that was asserted
+          if (hasErrorCheck) {
+            return {
+              criterionId: `custom-${i}`,
+              passed: true,
+              message: 'Error message found in assertion results',
+            };
+          }
+
+          // Fallback: any step error text suggests an error was encountered
+          const hasStepError = stepResults.some((s) => s.error);
+          return {
+            criterionId: `custom-${i}`,
+            passed: hasStepError,
+            message: hasStepError
+              ? 'Error condition detected in step results'
+              : 'No error message found in assertions or step results',
+          };
+        },
+      };
+    },
+  },
+
+  // ── Form submission success ──────────────────────────────────────────
+  // "form submits successfully", "form submission works"
+  {
+    regex: /form\s+(?:submits?|submission)\s+(?:successfully|works|completes)/i,
+    build(_match, line, i) {
+      return {
+        id: `custom-${i}`,
+        description: line,
+        type: 'functional' as const,
+        evaluate(stepResults: StepResult[]) {
+          // Check that all form-related steps (fill, select, check, click) passed
+          const formActions = ['fill', 'select', 'check', 'click'];
+          const formSteps = stepResults.filter((s) => formActions.includes(s.action));
+          const allFormPassed = formSteps.length > 0 && formSteps.every((s) => s.passed);
+          const noErrors = formSteps.every((s) => !s.error);
+
+          return {
+            criterionId: `custom-${i}`,
+            passed: allFormPassed && noErrors,
+            message: allFormPassed && noErrors
+              ? `All ${formSteps.length} form steps passed without errors`
+              : `Form submission check failed (${formSteps.filter((s) => !s.passed).length} step(s) failed)`,
+          };
+        },
+      };
+    },
+  },
+
+  // ── No errors ────────────────────────────────────────────────────────
+  // "no errors", "no error", "zero errors"
+  {
+    regex: /\b(?:no|zero)\s+errors?\b/i,
+    build(_match, line, i) {
+      return {
+        ...noStepErrors(),
+        id: `custom-${i}`,
+        description: line,
+      };
+    },
+  },
+
+  // ── All steps pass ───────────────────────────────────────────────────
+  // "all steps pass", "all steps succeed", "every step passes"
+  {
+    regex: /\b(?:all|every)\s+steps?\s+(?:pass|succeed|complete)/i,
+    build(_match, line, i) {
+      return {
+        ...allStepsPassed(),
+        id: `custom-${i}`,
+        description: line,
+      };
+    },
+  },
+
+  // ── Text content visible ─────────────────────────────────────────────
+  // "shows welcome message", "displays 'Success'", "text contains login"
+  {
+    regex: /(?:shows?|displays?|contains?|includes?)\s+(?:(?:the\s+)?(?:text|message)\s+)?['"]([^'"]+)['"]/i,
+    build(match, line, i) {
+      const expectedText = match[1];
+      return {
+        id: `custom-${i}`,
+        description: line,
+        type: 'functional' as const,
+        evaluate(stepResults: StepResult[]) {
+          for (const s of stepResults) {
+            const meta = s.metadata;
+            if (meta) {
+              const actual = (meta.actualText as string) ?? '';
+              if (actual.includes(expectedText)) {
+                return {
+                  criterionId: `custom-${i}`,
+                  passed: true,
+                  message: `Found text "${expectedText}" in step ${s.stepNumber}`,
+                };
+              }
+            }
+          }
+          return {
+            criterionId: `custom-${i}`,
+            passed: false,
+            message: `Expected text "${expectedText}" not found in any step metadata`,
+          };
+        },
+      };
+    },
+  },
+];
+
 export function parsePlainTextCriteria(text: string): AcceptanceCriterion[] {
   return text
     .split('\n')
     .map((line) => line.trim())
     .filter((line) => line.length > 0)
-    .map((line, i) => ({
-      id: `custom-${i}`,
-      description: line,
-      type: 'functional' as const,
-      evaluate(stepResults: StepResult[]) {
-        const allPassed = stepResults.every((s) => s.passed);
-        return {
-          criterionId: `custom-${i}`,
-          passed: allPassed,
-          message: allPassed ? `Criterion met: ${line}` : `Criterion may not be met: ${line}`,
-        };
-      },
-    }));
+    .map((line, i) => {
+      // Try each pattern in priority order
+      for (const pattern of CRITERION_PATTERNS) {
+        const match = line.match(pattern.regex);
+        if (match) {
+          return pattern.build(match, line, i);
+        }
+      }
+
+      // Fallback: unrecognized criteria use allStepsPassed (backward compatible)
+      return {
+        id: `custom-${i}`,
+        description: line,
+        type: 'functional' as const,
+        evaluate(stepResults: StepResult[]) {
+          const allPassed = stepResults.every((s) => s.passed);
+          return {
+            criterionId: `custom-${i}`,
+            passed: allPassed,
+            message: allPassed ? `Criterion met: ${line}` : `Criterion may not be met: ${line}`,
+          };
+        },
+      };
+    });
 }
 
 export function evaluateAllCriteria(

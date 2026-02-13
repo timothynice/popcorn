@@ -15,18 +15,18 @@
   align-items: center;
   gap: 8px;
   background: var(--bg-card);
-  border: 1px solid rgba(96, 165, 250, 0.15);
+  border: 1px solid var(--border-color);
   border-radius: var(--radius);
   padding: 8px 12px;
   transition: border-color 0.2s ease;
 }
 
 .criterionRow:focus-within {
-  border-color: rgba(96, 165, 250, 0.4);
+  border-color: var(--accent-blue);
 }
 
 .bulletNumber {
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   font-size: 12px;
   color: var(--text-secondary);
   font-weight: 600;
@@ -40,20 +40,20 @@
   border: none;
   outline: none;
   color: var(--text-primary);
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   font-size: 13px;
   padding: 4px 0;
 }
 
 .criterionInput::placeholder {
-  color: var(--text-secondary);
-  opacity: 0.6;
+  color: var(--text-muted);
+  opacity: 1;
 }
 
 .criterionText {
   flex: 1;
   color: var(--text-primary);
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   font-size: 13px;
   padding: 4px 0;
   line-height: 1.4;
@@ -77,7 +77,7 @@
 
 .removeButton:hover {
   color: var(--accent-red);
-  background: rgba(248, 113, 113, 0.1);
+  background: rgba(196, 85, 77, 0.08);
 }
 
 .removeButton:focus-visible {
@@ -87,10 +87,10 @@
 
 .addButton {
   background: var(--bg-card);
-  border: 1px dashed rgba(96, 165, 250, 0.3);
+  border: 1px dashed var(--border-color);
   border-radius: var(--radius);
   color: var(--accent-blue);
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   font-size: 13px;
   font-weight: 600;
   padding: 10px 16px;
@@ -100,13 +100,13 @@
 }
 
 .addButton:hover {
-  background: rgba(96, 165, 250, 0.08);
-  border-color: rgba(96, 165, 250, 0.5);
+  background: rgba(217, 119, 87, 0.06);
+  border-color: rgba(217, 119, 87, 0.3);
 }
 
 .addButton:focus-visible {
   border-color: var(--accent-blue);
-  box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.3);
+  box-shadow: 0 0 0 2px rgba(217, 119, 87, 0.3);
 }
 
 .empty {
@@ -125,7 +125,7 @@
 }
 
 .emptyMessage {
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   font-size: 14px;
   font-weight: 600;
   color: var(--text-primary);
@@ -137,4 +137,20 @@
   color: var(--text-secondary);
   margin: 0;
   max-width: 240px;
+}
+
+/* Dark mode overrides for hardcoded values */
+@media (prefers-color-scheme: dark) {
+  .removeButton:hover {
+    background: rgba(212, 112, 106, 0.12);
+  }
+
+  .addButton:hover {
+    background: rgba(224, 138, 108, 0.10);
+    border-color: rgba(224, 138, 108, 0.4);
+  }
+
+  .addButton:focus-visible {
+    box-shadow: 0 0 0 2px rgba(224, 138, 108, 0.4);
+  }
 }

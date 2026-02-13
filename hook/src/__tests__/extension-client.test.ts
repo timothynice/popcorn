@@ -20,20 +20,11 @@ describe('ExtensionClient', () => {
     const client = new ExtensionClient({
       projectRoot: tmpDir,
       pollIntervalMs: 50,
+      bridgePort: 19100,
     });
 
     await client.connect();
     expect(client.isConnected()).toBe(true);
-
-    // Check that hook_ready was sent to outbox
-    const outboxDir = path.join(tmpDir, '.popcorn', 'outbox');
-    const files = await fs.readdir(outboxDir);
-    expect(files.length).toBe(1);
-
-    const content = await fs.readFile(path.join(outboxDir, files[0]), 'utf-8');
-    const msg = JSON.parse(content);
-    expect(msg.type).toBe('hook_ready');
-    expect(msg.payload.hookVersion).toBe('0.1.0');
 
     client.disconnect();
     expect(client.isConnected()).toBe(false);
@@ -46,11 +37,12 @@ describe('ExtensionClient', () => {
     ).rejects.toThrow('Not connected');
   });
 
-  it('sends start_demo message to outbox', async () => {
+  it('sends start_demo message via active transport', async () => {
     const client = new ExtensionClient({
       projectRoot: tmpDir,
       pollIntervalMs: 50,
       timeoutMs: 500,
+      bridgePort: 19101,
     });
 
     await client.connect();
@@ -63,34 +55,26 @@ describe('ExtensionClient', () => {
       'Login.tsx',
     );
 
-    // Give it a moment to write the file
-    await new Promise((r) => setTimeout(r, 100));
-
-    const outboxDir = path.join(tmpDir, '.popcorn', 'outbox');
-    const files = await fs.readdir(outboxDir);
-    // Should have hook_ready + start_demo
-    expect(files.length).toBe(2);
-
-    const messages = await Promise.all(
-      files.map(async (f) => JSON.parse(await fs.readFile(path.join(outboxDir, f), 'utf-8'))),
-    );
-    const startDemo = messages.find((m) => m.type === 'start_demo');
-    expect(startDemo).toBeDefined();
-    expect(startDemo.payload.testPlanId).toBe('login-test');
-
     // Let it timeout
     await expect(demoPromise).rejects.toThrow('timed out');
     client.disconnect();
   });
 
-  it('resolves when demo result arrives in inbox', async () => {
+  it('resolves when demo result arrives via HTTP bridge', async () => {
     const client = new ExtensionClient({
       projectRoot: tmpDir,
       pollIntervalMs: 50,
       timeoutMs: 5000,
+      bridgePort: 19102,
     });
 
     await client.connect();
+    expect(client.getTransport()).toBe('http');
+
+    // Read the bridge.json to get port and token
+    const bridgePath = path.join(tmpDir, '.popcorn', 'bridge.json');
+    const bridgeData = JSON.parse(await fs.readFile(bridgePath, 'utf-8'));
+    const { port, token } = bridgeData;
 
     // Start demo
     const demoPromise = client.startDemo(
@@ -100,8 +84,7 @@ describe('ExtensionClient', () => {
       'test.ts',
     );
 
-    // Simulate extension writing a result to the inbox
-    const inboxDir = path.join(tmpDir, '.popcorn', 'inbox');
+    // Simulate extension posting a result back via HTTP
     const resultMsg: DemoResultMessage = {
       type: 'demo_result',
       payload: {
@@ -117,12 +100,16 @@ describe('ExtensionClient', () => {
       timestamp: Date.now(),
     };
 
-    // Wait a bit then write result
-    await new Promise((r) => setTimeout(r, 100));
-    await fs.writeFile(
-      path.join(inboxDir, `${Date.now()}-result.json`),
-      JSON.stringify(resultMsg),
-    );
+    await new Promise((r) => setTimeout(r, 50));
+    const res = await fetch(`http://127.0.0.1:${port}/result`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Popcorn-Token': token,
+      },
+      body: JSON.stringify({ message: resultMsg }),
+    });
+    expect(res.status).toBe(200);
 
     const result = await demoPromise;
     expect(result.passed).toBe(true);
@@ -137,6 +124,7 @@ describe('ExtensionClient', () => {
       projectRoot: tmpDir,
       pollIntervalMs: 50,
       timeoutMs: 5000,
+      bridgePort: 19103,
     });
 
     await client.connect();
@@ -159,5 +147,141 @@ describe('ExtensionClient', () => {
     await demoPromise;
     expect(caughtError).toBeInstanceOf(Error);
     expect(caughtError!.message).toContain('disconnected');
+  });
+});
+
+describe('ExtensionClient HTTP transport', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'popcorn-http-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('uses HTTP transport by default', async () => {
+    const client = new ExtensionClient({
+      projectRoot: tmpDir,
+      bridgePort: 19110,
+    });
+
+    await client.connect();
+    expect(client.getTransport()).toBe('http');
+    client.disconnect();
+  });
+
+  it('writes bridge.json on HTTP connect', async () => {
+    const client = new ExtensionClient({
+      projectRoot: tmpDir,
+      bridgePort: 19111,
+    });
+
+    await client.connect();
+
+    const bridgePath = path.join(tmpDir, '.popcorn', 'bridge.json');
+    const stat = await fs.stat(bridgePath);
+    expect(stat.isFile()).toBe(true);
+
+    const data = JSON.parse(await fs.readFile(bridgePath, 'utf-8'));
+    expect(data.port).toBe(19111);
+    expect(typeof data.token).toBe('string');
+    expect(data.pid).toBe(process.pid);
+    expect(typeof data.startedAt).toBe('string');
+
+    client.disconnect();
+  });
+
+  it('cleans up bridge.json on disconnect', async () => {
+    const client = new ExtensionClient({
+      projectRoot: tmpDir,
+      bridgePort: 19112,
+    });
+
+    await client.connect();
+
+    const bridgePath = path.join(tmpDir, '.popcorn', 'bridge.json');
+    // File should exist while connected
+    await fs.access(bridgePath);
+
+    client.disconnect();
+
+    // Give the async unlink a moment to complete
+    await new Promise((r) => setTimeout(r, 100));
+
+    // File should be removed after disconnect
+    await expect(fs.access(bridgePath)).rejects.toThrow();
+  });
+
+  it('falls back to file transport when bridge port range is exhausted', async () => {
+    // Start 10 servers to exhaust the port range 19120-19129
+    const http = await import('node:http');
+    const blockers: ReturnType<typeof http.createServer>[] = [];
+
+    for (let i = 0; i < 10; i++) {
+      const srv = http.createServer();
+      await new Promise<void>((resolve, reject) => {
+        srv.once('error', reject);
+        srv.once('listening', resolve);
+        srv.listen(19120 + i, '127.0.0.1');
+      });
+      blockers.push(srv);
+    }
+
+    try {
+      const client = new ExtensionClient({
+        projectRoot: tmpDir,
+        pollIntervalMs: 50,
+        bridgePort: 19120,
+      });
+
+      await client.connect();
+      expect(client.getTransport()).toBe('file');
+      expect(client.isConnected()).toBe(true);
+      client.disconnect();
+    } finally {
+      for (const srv of blockers) {
+        srv.close();
+      }
+    }
+  });
+
+  it('extension can poll queued messages via HTTP bridge', async () => {
+    const client = new ExtensionClient({
+      projectRoot: tmpDir,
+      pollIntervalMs: 50,
+      timeoutMs: 500,
+      bridgePort: 19130,
+    });
+
+    await client.connect();
+    expect(client.getTransport()).toBe('http');
+
+    // Read bridge info
+    const bridgePath = path.join(tmpDir, '.popcorn', 'bridge.json');
+    const { port, token } = JSON.parse(await fs.readFile(bridgePath, 'utf-8'));
+
+    // Start a demo — this enqueues a start_demo message
+    const demoPromise = client.startDemo(
+      'poll-test',
+      { planName: 'poll', steps: [], baseUrl: '/' },
+      [],
+      'test.ts',
+    ).catch(() => { /* will timeout, that's fine */ });
+
+    // Poll for messages as the extension would
+    const res = await fetch(`http://127.0.0.1:${port}/poll`, {
+      headers: { 'X-Popcorn-Token': token },
+    });
+    const data = await res.json() as { messages: Array<{ type: string }> };
+
+    // Should contain hook_ready and start_demo
+    const types = data.messages.map((m) => m.type);
+    expect(types).toContain('hook_ready');
+    expect(types).toContain('start_demo');
+
+    client.disconnect();
+    await demoPromise;
   });
 });

@@ -6,12 +6,14 @@ export interface ExtensionState {
   status: ExtensionStatus;
   connected: boolean;
   error: string | null;
+  hookConnected: boolean;
 }
 
 export function useExtensionState() {
   const [status, setStatus] = useState<ExtensionStatus>('idle');
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [hookConnected, setHookConnected] = useState(false);
 
   useEffect(() => {
     // Check initial connection status
@@ -29,6 +31,14 @@ export function useExtensionState() {
         setError(err instanceof Error ? err.message : 'Connection failed');
       });
 
+    chrome.runtime.sendMessage({ type: 'get_hook_status' })
+      .then((response) => {
+        if (response?.hookConnected !== undefined) {
+          setHookConnected(response.hookConnected);
+        }
+      })
+      .catch(() => {});
+
     // Listen for status updates from background script
     const messageListener = (
       message: any,
@@ -39,6 +49,8 @@ export function useExtensionState() {
         setStatus(message.payload.status);
         setConnected(true);
         setError(message.payload.error || null);
+      } else if (message.type === 'hook_status') {
+        setHookConnected(message.payload.connected);
       } else if (message.type === 'start_demo') {
         setStatus('recording');
         setError(null);
@@ -76,5 +88,6 @@ export function useExtensionState() {
     status,
     connected,
     error,
+    hookConnected,
   };
 }

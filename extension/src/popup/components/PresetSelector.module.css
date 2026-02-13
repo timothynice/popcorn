@@ -5,7 +5,7 @@
 }
 
 .label {
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   font-size: 12px;
   font-weight: 600;
   color: var(--text-secondary);
@@ -15,10 +15,10 @@
 
 .select {
   background: var(--bg-card);
-  border: 1px solid rgba(96, 165, 250, 0.15);
+  border: 1px solid var(--border-color);
   border-radius: var(--radius);
   color: var(--text-primary);
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   font-size: 13px;
   padding: 10px 12px;
   cursor: pointer;
@@ -27,16 +27,27 @@
 }
 
 .select:hover {
-  border-color: rgba(96, 165, 250, 0.4);
+  border-color: #d4d2c8;
 }
 
 .select:focus {
   border-color: var(--accent-blue);
-  box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.3);
+  box-shadow: 0 0 0 2px rgba(217, 119, 87, 0.3);
 }
 
 .select option {
   background: var(--bg-card);
   color: var(--text-primary);
   padding: 8px;
+}
+
+/* Dark mode overrides for hardcoded values */
+@media (prefers-color-scheme: dark) {
+  .select:hover {
+    border-color: #4a4a47;
+  }
+
+  .select:focus {
+    box-shadow: 0 0 0 2px rgba(224, 138, 108, 0.4);
+  }
 }

@@ -23,14 +23,13 @@ function formatTimestamp(timestamp: number): string {
 }
 
 function formatDuration(ms: number): string {
-  const seconds = (ms / 1000).toFixed(1);
-  return `${seconds}s`;
+  return `${(ms / 1000).toFixed(1)}s`;
 }
 
 export function TapeCard({ tape, onClick, isSelected }: TapeCardProps) {
   return (
     <div
-      className={`${styles.tapeCard} ${isSelected ? styles.selected : ''}`}
+      className={`${styles.row} ${isSelected ? styles.selected : ''}`}
       onClick={onClick}
       role="button"
       tabIndex={0}
@@ -41,17 +40,34 @@ export function TapeCard({ tape, onClick, isSelected }: TapeCardProps) {
         }
       }}
     >
-      <div className={styles.header}>
-        <h3 className={styles.demoName}>{tape.demoName}</h3>
-        <span className={`${styles.badge} ${tape.passed ? styles.badgePass : styles.badgeFail}`}>
-          {tape.passed ? '✓' : '✗'}
-        </span>
+      <div className={styles.thumbnail}>
+        {tape.thumbnailDataUrl ? (
+          <img
+            src={tape.thumbnailDataUrl}
+            alt={`${tape.demoName} thumbnail`}
+            className={styles.thumbnailImg}
+          />
+        ) : (
+          <div className={`${styles.thumbnailFallback} ${tape.passed ? styles.thumbnailPass : styles.thumbnailFail}`}>
+            <span className={styles.thumbnailIcon}>
+              {tape.passed ? '\u2713' : '\u2717'}
+            </span>
+          </div>
+        )}
       </div>
-      <div className={styles.metadata}>
-        <span className={styles.timestamp}>{formatTimestamp(tape.timestamp)}</span>
-        <span className={styles.duration}>{formatDuration(tape.duration)}</span>
+      <div className={styles.info}>
+        <div className={styles.nameRow}>
+          <span className={`${styles.badge} ${tape.passed ? styles.badgePass : styles.badgeFail}`}>
+            {tape.passed ? '\u2713' : '\u2717'}
+          </span>
+          <span className={styles.demoName}>{tape.demoName}</span>
+        </div>
+        <div className={styles.meta}>
+          <span>{formatTimestamp(tape.timestamp)}</span>
+          <span className={styles.metaDot}>{'\u00B7'}</span>
+          <span>{formatDuration(tape.duration)}</span>
+        </div>
       </div>
-      <p className={styles.summary}>{tape.summary}</p>
     </div>
   );
 }

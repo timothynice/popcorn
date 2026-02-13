@@ -9,11 +9,13 @@
 
 import path from 'node:path';
 import type { PopcornConfig } from './config.js';
-import { loadConfig } from './config.js';
+import { loadConfigFromFile } from './config.js';
 import { Watcher } from './watcher.js';
 import type { FileChangeEvent } from './watcher.js';
 import { ExtensionClient } from './extension-client.js';
 import { loadTestPlan, listTestPlans } from './plan-loader.js';
+import { generatePlanFromFile, savePlan } from './plan-generator.js';
+import { loadCriteria } from './criteria-loader.js';
 import { createLogger } from './logger.js';
 import type { Logger } from './logger.js';
 import type { DemoResult } from '@popcorn/shared';
@@ -48,7 +50,7 @@ export async function setup(
   projectRoot?: string,
 ): Promise<void> {
   const root = projectRoot ?? process.cwd();
-  const config = loadConfig(overrides);
+  const config = await loadConfigFromFile(root, overrides);
 
   log.info('Starting hook', { watchDir: config.watchDir, projectRoot: root });
 
@@ -134,18 +136,31 @@ async function handleFileChange(
 
   // Try to find a matching test plan
   const baseName = path.basename(event.relativePath, path.extname(event.relativePath));
-  const planName = await findMatchingPlan(baseName, testPlansDir);
+  let planName = await findMatchingPlan(baseName, testPlansDir);
 
   if (!planName) {
-    log.debug(`No matching test plan for '${baseName}'`);
-    return;
+    log.info(`No matching test plan for '${baseName}', generating...`);
+
+    const absFilePath = path.resolve(projectRoot, event.relativePath);
+    const generatedPlan = await generatePlanFromFile(absFilePath, {
+      baseUrl: '/',
+    });
+
+    if (!generatedPlan) {
+      log.debug(`No interactive elements in '${baseName}'`);
+      return;
+    }
+
+    const savedPath = await savePlan(generatedPlan, testPlansDir);
+    log.info(`Generated test plan: ${savedPath}`);
+    planName = generatedPlan.planName;
   }
 
   try {
     if (hookState) hookState.demoInFlight = true;
 
     const testPlan = await loadTestPlan(planName, testPlansDir);
-    const acceptanceCriteria = ['All steps pass'];
+    const acceptanceCriteria = await loadCriteria(planName, testPlansDir);
 
     log.info(`Dispatching test plan '${planName}'`, {
       triggeredBy: event.relativePath,

@@ -2,61 +2,63 @@ import type { TestStep, StepResult } from '@popcorn/shared';
 
 const DEFAULT_TIMEOUT = 5000;
 
+/** Unified return type for all action handlers. */
+interface ActionResult {
+  passed: boolean;
+  error?: string;
+  metadata?: Record<string, unknown>;
+}
+
 export async function executeAction(step: TestStep): Promise<StepResult> {
   const startTime = Date.now();
   const timeout = step.timeout || DEFAULT_TIMEOUT;
 
   try {
-    let passed = false;
-    let error: string | undefined;
+    let result: ActionResult;
 
     switch (step.action) {
       case 'navigate':
-        passed = await handleNavigate(step, timeout);
+        result = await handleNavigate(step, timeout);
         break;
       case 'click':
-        passed = await handleClick(step, timeout);
+        result = await handleClick(step, timeout);
         break;
       case 'fill':
-        passed = await handleFill(step, timeout);
+        result = await handleFill(step, timeout);
         break;
       case 'select':
-        passed = await handleSelect(step, timeout);
+        result = await handleSelect(step, timeout);
         break;
       case 'check':
-        passed = await handleCheck(step, true, timeout);
+        result = await handleCheck(step, true, timeout);
         break;
       case 'uncheck':
-        passed = await handleCheck(step, false, timeout);
+        result = await handleCheck(step, false, timeout);
         break;
       case 'hover':
-        passed = await handleHover(step, timeout);
+        result = await handleHover(step, timeout);
         break;
       case 'scroll':
-        passed = await handleScroll(step, timeout);
+        result = await handleScroll(step, timeout);
         break;
       case 'wait':
-        passed = await handleWait(step, timeout);
+        result = await handleWait(step, timeout);
         break;
       case 'assert':
-        const assertResult = await handleAssert(step, timeout);
-        passed = assertResult.passed;
-        error = assertResult.error;
+        result = await handleAssert(step, timeout);
         break;
       case 'keypress':
-        passed = await handleKeypress(step, timeout);
+        result = await handleKeypress(step, timeout);
         break;
       case 'screenshot':
-        passed = true; // Screenshot handled by orchestrator
+        result = { passed: true }; // Screenshot handled by orchestrator
         break;
       case 'drag':
       case 'upload':
-        passed = false;
-        error = `Action ${step.action} not yet implemented`;
+        result = { passed: false, error: `Action ${step.action} not yet implemented` };
         break;
       default:
-        passed = false;
-        error = `Unknown action: ${step.action}`;
+        result = { passed: false, error: `Unknown action: ${step.action}` };
     }
 
     const duration = Date.now() - startTime;
@@ -65,9 +67,10 @@ export async function executeAction(step: TestStep): Promise<StepResult> {
       stepNumber: step.stepNumber,
       action: step.action,
       description: step.description,
-      passed,
+      passed: result.passed,
       duration,
-      error,
+      error: result.error,
+      metadata: result.metadata,
       timestamp: Date.now(),
     };
   } catch (err) {
@@ -86,7 +89,7 @@ export async function executeAction(step: TestStep): Promise<StepResult> {
   }
 }
 
-async function handleNavigate(step: TestStep, timeout: number): Promise<boolean> {
+async function handleNavigate(step: TestStep, timeout: number): Promise<ActionResult> {
   if (!step.target) {
     throw new Error('Navigate action requires target URL');
   }
@@ -94,10 +97,13 @@ async function handleNavigate(step: TestStep, timeout: number): Promise<boolean>
   window.location.href = step.target;
   // Wait for navigation to complete
   await waitForTimeout(Math.min(timeout, 3000));
-  return true;
+  return {
+    passed: true,
+    metadata: { targetUrl: step.target, finalUrl: window.location.href },
+  };
 }
 
-async function handleClick(step: TestStep, timeout: number): Promise<boolean> {
+async function handleClick(step: TestStep, timeout: number): Promise<ActionResult> {
   const element = await findElement(step.selector, step.selectorFallback, timeout);
   if (!element) {
     throw new Error(`Element not found: ${step.selector}`);
@@ -109,10 +115,10 @@ async function handleClick(step: TestStep, timeout: number): Promise<boolean> {
     throw new Error('Element is not clickable');
   }
 
-  return true;
+  return { passed: true };
 }
 
-async function handleFill(step: TestStep, timeout: number): Promise<boolean> {
+async function handleFill(step: TestStep, timeout: number): Promise<ActionResult> {
   const element = await findElement(step.selector, step.selectorFallback, timeout);
   if (!element) {
     throw new Error(`Element not found: ${step.selector}`);
@@ -129,10 +135,10 @@ async function handleFill(step: TestStep, timeout: number): Promise<boolean> {
     throw new Error('Element is not a text input or textarea');
   }
 
-  return true;
+  return { passed: true };
 }
 
-async function handleSelect(step: TestStep, timeout: number): Promise<boolean> {
+async function handleSelect(step: TestStep, timeout: number): Promise<ActionResult> {
   const element = await findElement(step.selector, step.selectorFallback, timeout);
   if (!element) {
     throw new Error(`Element not found: ${step.selector}`);
@@ -145,14 +151,14 @@ async function handleSelect(step: TestStep, timeout: number): Promise<boolean> {
     throw new Error('Element is not a select element');
   }
 
-  return true;
+  return { passed: true };
 }
 
 async function handleCheck(
   step: TestStep,
   checked: boolean,
   timeout: number,
-): Promise<boolean> {
+): Promise<ActionResult> {
   const element = await findElement(step.selector, step.selectorFallback, timeout);
   if (!element) {
     throw new Error(`Element not found: ${step.selector}`);
@@ -165,10 +171,10 @@ async function handleCheck(
     throw new Error('Element is not a checkbox');
   }
 
-  return true;
+  return { passed: true };
 }
 
-async function handleHover(step: TestStep, timeout: number): Promise<boolean> {
+async function handleHover(step: TestStep, timeout: number): Promise<ActionResult> {
   const element = await findElement(step.selector, step.selectorFallback, timeout);
   if (!element) {
     throw new Error(`Element not found: ${step.selector}`);
@@ -177,10 +183,10 @@ async function handleHover(step: TestStep, timeout: number): Promise<boolean> {
   element.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
   element.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
 
-  return true;
+  return { passed: true };
 }
 
-async function handleScroll(step: TestStep, timeout: number): Promise<boolean> {
+async function handleScroll(step: TestStep, timeout: number): Promise<ActionResult> {
   if (step.selector) {
     const element = await findElement(step.selector, step.selectorFallback, timeout);
     if (!element) {
@@ -200,29 +206,29 @@ async function handleScroll(step: TestStep, timeout: number): Promise<boolean> {
 
   // Wait for scroll to complete
   await waitForTimeout(100);
-  return true;
+  return { passed: true };
 }
 
-async function handleWait(step: TestStep, timeout: number): Promise<boolean> {
+async function handleWait(step: TestStep, timeout: number): Promise<ActionResult> {
   if (step.condition === 'timeout') {
     await waitForTimeout(step.timeout || 1000);
-    return true;
+    return { passed: true };
   }
 
   if (step.condition === 'visible' && step.selector) {
     await waitForElement(step.selector, timeout);
-    return true;
+    return { passed: true };
   }
 
   if (step.condition === 'hidden' && step.selector) {
     await waitForElementHidden(step.selector, timeout);
-    return true;
+    return { passed: true };
   }
 
   if (step.condition === 'networkIdle') {
     // Simple network idle detection - wait for no new requests for 500ms
     await waitForTimeout(500);
-    return true;
+    return { passed: true };
   }
 
   throw new Error(`Unsupported wait condition: ${step.condition}`);
@@ -231,7 +237,7 @@ async function handleWait(step: TestStep, timeout: number): Promise<boolean> {
 async function handleAssert(
   step: TestStep,
   timeout: number,
-): Promise<{ passed: boolean; error?: string }> {
+): Promise<ActionResult> {
   try {
     switch (step.assertionType) {
       case 'text': {
@@ -251,11 +257,15 @@ async function handleAssert(
         const expectedText = String(step.expected || '');
 
         if (actualText.includes(expectedText)) {
-          return { passed: true };
+          return {
+            passed: true,
+            metadata: { assertionType: 'text', expectedText, actualText },
+          };
         } else {
           return {
             passed: false,
             error: `Expected text "${expectedText}" not found. Actual: "${actualText}"`,
+            metadata: { assertionType: 'text', expectedText, actualText },
           };
         }
       }
@@ -279,11 +289,12 @@ async function handleAssert(
           element.offsetHeight > 0;
 
         if (isVisible) {
-          return { passed: true };
+          return { passed: true, metadata: { assertionType: 'visible' } };
         } else {
           return {
             passed: false,
             error: `Element is not visible: ${step.selector}`,
+            metadata: { assertionType: 'visible' },
           };
         }
       }
@@ -296,11 +307,12 @@ async function handleAssert(
             (element.offsetWidth === 0 || element.offsetHeight === 0));
 
         if (isHidden) {
-          return { passed: true };
+          return { passed: true, metadata: { assertionType: 'hidden' } };
         } else {
           return {
             passed: false,
             error: `Element is visible but should be hidden: ${step.selector}`,
+            metadata: { assertionType: 'hidden' },
           };
         }
       }
@@ -310,11 +322,15 @@ async function handleAssert(
         const actualUrl = window.location.href;
 
         if (actualUrl.includes(expectedUrl)) {
-          return { passed: true };
+          return {
+            passed: true,
+            metadata: { assertionType: 'url', expectedUrl, actualUrl },
+          };
         } else {
           return {
             passed: false,
             error: `Expected URL to contain "${expectedUrl}". Actual: "${actualUrl}"`,
+            metadata: { assertionType: 'url', expectedUrl, actualUrl },
           };
         }
       }
@@ -325,11 +341,15 @@ async function handleAssert(
         const actualCount = elements.length;
 
         if (actualCount === expectedCount) {
-          return { passed: true };
+          return {
+            passed: true,
+            metadata: { assertionType: 'count', expectedCount, actualCount },
+          };
         } else {
           return {
             passed: false,
             error: `Expected ${expectedCount} elements, found ${actualCount}`,
+            metadata: { assertionType: 'count', expectedCount, actualCount },
           };
         }
       }
@@ -352,11 +372,12 @@ async function handleAssert(
         const actualValue = element.getAttribute(attrName) || '';
 
         if (actualValue.includes(expectedValue)) {
-          return { passed: true };
+          return { passed: true, metadata: { assertionType: 'attribute', attrName, expectedValue, actualValue } };
         } else {
           return {
             passed: false,
             error: `Attribute "${attrName}" expected "${expectedValue}", got "${actualValue}"`,
+            metadata: { assertionType: 'attribute', attrName, expectedValue, actualValue },
           };
         }
       }
@@ -383,11 +404,12 @@ async function handleAssert(
           const actualValue = element.value;
 
           if (actualValue === expectedValue) {
-            return { passed: true };
+            return { passed: true, metadata: { assertionType: 'value', expectedValue, actualValue } };
           } else {
             return {
               passed: false,
               error: `Expected value "${expectedValue}", got "${actualValue}"`,
+              metadata: { assertionType: 'value', expectedValue, actualValue },
             };
           }
         } else {
@@ -412,7 +434,7 @@ async function handleAssert(
   }
 }
 
-async function handleKeypress(step: TestStep, timeout: number): Promise<boolean> {
+async function handleKeypress(step: TestStep, timeout: number): Promise<ActionResult> {
   const element = step.selector
     ? await findElement(step.selector, step.selectorFallback, timeout)
     : document.activeElement;
@@ -437,7 +459,7 @@ async function handleKeypress(step: TestStep, timeout: number): Promise<boolean>
     }),
   );
 
-  return true;
+  return { passed: true };
 }
 
 // Helper functions

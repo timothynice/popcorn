@@ -1,9 +1,8 @@
 /**
  * Integration test for the Popcorn hook pipeline.
- * Creates a mock project directory with a test plan, sets up the hook
- * using the real Messenger and ExtensionClient, simulates a file change,
- * and verifies that the correct messages are sent. The extension response
- * is simulated by writing a demo_result to the inbox directory.
+ * Tests the full flow: load test plans, send start_demo through
+ * ExtensionClient (HTTP bridge), simulate extension responses,
+ * and verify the Messenger (file-based IPC) round-trip.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -75,9 +74,11 @@ describe('Hook Integration', () => {
       projectRoot: tmpDir,
       pollIntervalMs: 50,
       timeoutMs: 2000,
+      bridgePort: 19200,
     });
 
     await client.connect();
+    expect(client.getTransport()).toBe('http');
 
     // Load the test plan
     const plan = await loadTestPlan('login', testPlansDir);
@@ -92,30 +93,29 @@ describe('Hook Integration', () => {
       'LoginPage.tsx',
     );
 
-    // Wait for message to be written
+    // Wait for message to be queued
     await sleep(100);
 
-    // Verify outbox has hook_ready + start_demo
-    const outboxDir = path.join(tmpDir, '.popcorn', 'outbox');
-    const outboxFiles = await fsp.readdir(outboxDir);
-    expect(outboxFiles.length).toBe(2);
+    // Read bridge.json to get port and token
+    const bridgePath = path.join(tmpDir, '.popcorn', 'bridge.json');
+    const { port, token } = JSON.parse(await fsp.readFile(bridgePath, 'utf-8'));
 
-    const messages = await Promise.all(
-      outboxFiles.map(async (f) =>
-        JSON.parse(await fsp.readFile(path.join(outboxDir, f), 'utf-8')),
-      ),
-    );
+    // Poll via HTTP to verify messages are queued
+    const pollRes = await fetch(`http://127.0.0.1:${port}/poll`, {
+      headers: { 'X-Popcorn-Token': token },
+    });
+    const pollData = await pollRes.json() as { messages: Array<{ type: string; payload: Record<string, unknown> }> };
 
-    const hookReady = messages.find((m) => m.type === 'hook_ready');
+    const hookReady = pollData.messages.find((m) => m.type === 'hook_ready');
     expect(hookReady).toBeDefined();
-    expect(hookReady.payload.hookVersion).toBe('0.1.0');
+    expect(hookReady!.payload.hookVersion).toBe('0.1.0');
 
-    const startDemo = messages.find((m) => m.type === 'start_demo') as StartDemoMessage;
+    const startDemo = pollData.messages.find((m) => m.type === 'start_demo');
     expect(startDemo).toBeDefined();
-    expect(startDemo.payload.testPlanId).toBe('login');
-    expect(startDemo.payload.testPlan.steps).toHaveLength(3);
-    expect(startDemo.payload.acceptanceCriteria).toEqual(['All steps pass']);
-    expect(startDemo.payload.triggeredBy).toBe('LoginPage.tsx');
+    expect(startDemo!.payload.testPlanId).toBe('login');
+    expect((startDemo!.payload as any).testPlan.steps).toHaveLength(3);
+    expect((startDemo!.payload as any).acceptanceCriteria).toEqual(['All steps pass']);
+    expect((startDemo!.payload as any).triggeredBy).toBe('LoginPage.tsx');
 
     // Let it time out
     await expect(demoPromise).rejects.toThrow('timed out');
@@ -127,9 +127,11 @@ describe('Hook Integration', () => {
       projectRoot: tmpDir,
       pollIntervalMs: 50,
       timeoutMs: 5000,
+      bridgePort: 19201,
     });
 
     await client.connect();
+    expect(client.getTransport()).toBe('http');
 
     const plan = await loadTestPlan('login', testPlansDir);
 
@@ -141,9 +143,10 @@ describe('Hook Integration', () => {
       'Login.tsx',
     );
 
-    // Simulate extension writing a result to the inbox
+    // Simulate extension posting a result back via HTTP
     await sleep(100);
-    const inboxDir = path.join(tmpDir, '.popcorn', 'inbox');
+    const bridgePath = path.join(tmpDir, '.popcorn', 'bridge.json');
+    const { port, token } = JSON.parse(await fsp.readFile(bridgePath, 'utf-8'));
 
     const resultMsg: DemoResultMessage = {
       type: 'demo_result',
@@ -164,10 +167,14 @@ describe('Hook Integration', () => {
       timestamp: Date.now(),
     };
 
-    await fsp.writeFile(
-      path.join(inboxDir, `${Date.now()}-result.json`),
-      JSON.stringify(resultMsg),
-    );
+    await fetch(`http://127.0.0.1:${port}/result`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Popcorn-Token': token,
+      },
+      body: JSON.stringify({ message: resultMsg }),
+    });
 
     // Wait for result
     const result = await demoPromise;
@@ -185,6 +192,7 @@ describe('Hook Integration', () => {
       projectRoot: tmpDir,
       pollIntervalMs: 50,
       timeoutMs: 5000,
+      bridgePort: 19202,
     });
 
     await client.connect();
@@ -199,7 +207,8 @@ describe('Hook Integration', () => {
     );
 
     await sleep(100);
-    const inboxDir = path.join(tmpDir, '.popcorn', 'inbox');
+    const bridgePath = path.join(tmpDir, '.popcorn', 'bridge.json');
+    const { port, token } = JSON.parse(await fsp.readFile(bridgePath, 'utf-8'));
 
     const failedResult: DemoResultMessage = {
       type: 'demo_result',
@@ -220,10 +229,14 @@ describe('Hook Integration', () => {
       timestamp: Date.now(),
     };
 
-    await fsp.writeFile(
-      path.join(inboxDir, `${Date.now()}-result.json`),
-      JSON.stringify(failedResult),
-    );
+    await fetch(`http://127.0.0.1:${port}/result`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Popcorn-Token': token,
+      },
+      body: JSON.stringify({ message: failedResult }),
+    });
 
     const result = await demoPromise;
     expect(result.passed).toBe(false);

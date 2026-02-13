@@ -22,7 +22,6 @@ export function TapeList({
     return (
       <div className={styles.container}>
         <div className={styles.error}>
-          <span className={styles.errorIcon}>⚠</span>
           <p className={styles.errorMessage}>{error}</p>
         </div>
       </div>
@@ -44,10 +43,9 @@ export function TapeList({
     return (
       <div className={styles.container}>
         <div className={styles.empty}>
-          <span className={styles.emptyIcon}>🎬</span>
-          <p className={styles.emptyMessage}>No tapes yet.</p>
+          <p className={styles.emptyMessage}>No tapes yet</p>
           <p className={styles.emptyHint}>
-            Modify a frontend file to trigger a demo.
+            Modify a frontend file to trigger a demo, or use the settings panel to run one manually.
           </p>
         </div>
       </div>

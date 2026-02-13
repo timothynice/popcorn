@@ -21,6 +21,17 @@ export interface HookErrorPayload {
   details?: unknown;
 }
 
+export interface SaveCriteriaPayload {
+  flow: string;
+  criteria: string[];
+}
+
+export interface SaveCriteriaResultPayload {
+  flow: string;
+  success: boolean;
+  error?: string;
+}
+
 export interface StartDemoMessage {
   type: 'start_demo';
   payload: StartDemoPayload;
@@ -51,12 +62,26 @@ export interface HookErrorMessage {
   timestamp: number;
 }
 
+export interface SaveCriteriaMessage {
+  type: 'save_criteria';
+  payload: SaveCriteriaPayload;
+  timestamp: number;
+}
+
+export interface SaveCriteriaResultMessage {
+  type: 'save_criteria_result';
+  payload: SaveCriteriaResultPayload;
+  timestamp: number;
+}
+
 export type PopcornMessage =
   | StartDemoMessage
   | DemoResultMessage
   | HookReadyMessage
   | ExtensionReadyMessage
-  | HookErrorMessage;
+  | HookErrorMessage
+  | SaveCriteriaMessage
+  | SaveCriteriaResultMessage;
 
 export type PopcornMessageType = PopcornMessage['type'];
 

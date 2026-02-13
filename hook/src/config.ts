@@ -4,6 +4,9 @@
  * debounce timing, and where test plans live.
  */
 
+import fs from 'node:fs/promises';
+import path from 'node:path';
+
 export interface PopcornConfig {
   /** Directory to watch for frontend file changes, relative to project root. */
   watchDir: string;
@@ -17,6 +20,8 @@ export interface PopcornConfig {
   testPlansDir: string;
   /** Marker comment that flags files as UI-testable outside watchDir. */
   popcornMarker: string;
+  /** Preferred starting port for the HTTP bridge server. Default: 7890 */
+  bridgePort?: number;
 }
 
 /**
@@ -30,6 +35,7 @@ export function getDefaultConfig(): PopcornConfig {
     ignorePatterns: ['node_modules', '.git', 'dist'],
     testPlansDir: 'test-plans',
     popcornMarker: '// popcorn-test',
+    bridgePort: 7890,
   };
 }
 
@@ -43,4 +49,31 @@ export function loadConfig(overrides?: Partial<PopcornConfig>): PopcornConfig {
     return defaults;
   }
   return { ...defaults, ...overrides };
+}
+
+/**
+ * Loads config from popcorn.config.json at the project root,
+ * merging with defaults. Programmatic overrides take precedence
+ * over file config, which takes precedence over defaults.
+ * Falls back to defaults if the file is not found or invalid.
+ */
+export async function loadConfigFromFile(
+  projectRoot: string,
+  overrides?: Partial<PopcornConfig>,
+): Promise<PopcornConfig> {
+  const configPath = path.resolve(projectRoot, 'popcorn.config.json');
+  let fileConfig: Partial<PopcornConfig> = {};
+
+  try {
+    const raw = await fs.readFile(configPath, 'utf-8');
+    const parsed = JSON.parse(raw);
+    if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+      fileConfig = parsed as Partial<PopcornConfig>;
+    }
+  } catch {
+    // File not found or invalid — use defaults
+  }
+
+  // Overrides > file config > defaults
+  return loadConfig({ ...fileConfig, ...overrides });
 }

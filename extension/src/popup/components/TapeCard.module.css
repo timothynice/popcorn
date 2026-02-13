@@ -1,91 +1,149 @@
-.tapeCard {
-  background: var(--bg-card);
-  border: 1px solid rgba(96, 165, 250, 0.15);
-  border-radius: var(--radius);
-  padding: 12px;
+.row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background 0.12s ease;
   outline: none;
+  border-bottom: 1px solid var(--border-subtle);
 }
 
-.tapeCard:hover {
-  border-color: rgba(96, 165, 250, 0.4);
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+.row:last-child {
+  border-bottom: none;
 }
 
-.tapeCard:focus-visible {
-  border-color: var(--accent-blue);
-  box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.3);
+.row:hover {
+  background: var(--bg-secondary);
+}
+
+.row:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--accent-blue);
 }
 
 .selected {
-  border-color: var(--accent-blue);
-  background: rgba(96, 165, 250, 0.08);
+  background: rgba(217, 119, 87, 0.04);
 }
 
-.header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 8px;
-}
-
-.demoName {
-  font-family: var(--font-mono);
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text-primary);
-  margin: 0;
-  white-space: nowrap;
+.thumbnail {
+  width: 44px;
+  height: 32px;
+  border-radius: 4px;
   overflow: hidden;
-  text-overflow: ellipsis;
+  flex-shrink: 0;
+  border: 1px solid var(--border-color);
+}
+
+.thumbnailImg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.thumbnailFallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.thumbnailPass {
+  background: rgba(120, 140, 93, 0.08);
+  color: var(--accent-green);
+}
+
+.thumbnailFail {
+  background: rgba(196, 85, 77, 0.08);
+  color: var(--accent-red);
+}
+
+.thumbnailIcon {
+  line-height: 1;
+}
+
+.info {
   flex: 1;
-  margin-right: 8px;
+  min-width: 0;
+}
+
+.nameRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 2px;
 }
 
 .badge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
-  border-radius: 4px;
-  font-size: 12px;
-  font-weight: 600;
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 700;
   flex-shrink: 0;
 }
 
 .badgePass {
-  background: rgba(74, 222, 128, 0.15);
+  background: rgba(120, 140, 93, 0.1);
   color: var(--accent-green);
 }
 
 .badgeFail {
-  background: rgba(248, 113, 113, 0.15);
+  background: rgba(196, 85, 77, 0.1);
   color: var(--accent-red);
 }
 
-.metadata {
-  display: flex;
-  gap: 12px;
-  margin-bottom: 8px;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--text-secondary);
-}
-
-.timestamp,
-.duration {
-  display: inline-block;
-}
-
-.summary {
-  font-size: 12px;
-  color: var(--text-secondary);
-  line-height: 1.5;
-  margin: 0;
+.demoName {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.metaDot {
+  color: var(--text-muted);
+}
+
+@media (prefers-color-scheme: dark) {
+  .selected {
+    background: rgba(224, 138, 108, 0.06);
+  }
+
+  .row:focus-visible {
+    box-shadow: inset 0 0 0 2px var(--accent-blue);
+  }
+
+  .thumbnailPass {
+    background: rgba(143, 168, 114, 0.12);
+  }
+
+  .thumbnailFail {
+    background: rgba(212, 112, 106, 0.12);
+  }
+
+  .badgePass {
+    background: rgba(143, 168, 114, 0.15);
+  }
+
+  .badgeFail {
+    background: rgba(212, 112, 106, 0.15);
+  }
 }
