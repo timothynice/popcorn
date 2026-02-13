@@ -86,9 +86,9 @@ export async function findImporters(
   async function scanDir(dir: string, depth: number): Promise<void> {
     if (depth > MAX_DEPTH) return;
 
-    let entries: Awaited<ReturnType<typeof fs.readdir>>;
+    let entries: import('node:fs').Dirent[];
     try {
-      entries = await fs.readdir(dir, { withFileTypes: true });
+      entries = await fs.readdir(dir, { withFileTypes: true, encoding: 'utf8' });
     } catch {
       return; // Skip unreadable directories
     }
