@@ -51,7 +51,9 @@ export async function executeAction(step: TestStep): Promise<StepResult> {
         result = await handleKeypress(step, timeout);
         break;
       case 'screenshot':
-        result = { passed: true }; // Screenshot handled by orchestrator
+        result = step.name === 'multi-state-discovery'
+          ? await handleMultiStateDiscovery(step)
+          : { passed: true }; // Regular screenshot handled by orchestrator
         break;
       case 'drag':
       case 'upload':
@@ -432,6 +434,46 @@ async function handleAssert(
       error: err instanceof Error ? err.message : String(err),
     };
   }
+}
+
+const NAVIGATION_SELECTORS = [
+  '[role="tab"]',
+  '[data-slide]',
+  '[data-slide-index]',
+  '.carousel-control',
+  'button[aria-label*="next" i]',
+  'button[aria-label*="prev" i]',
+  '.pagination a',
+  '.progress-dot',
+  '.dot',
+  '.nav-dot',
+  'button[aria-label*="slide" i]',
+].join(', ');
+
+async function handleMultiStateDiscovery(_step: TestStep): Promise<ActionResult> {
+  const controls = document.querySelectorAll(NAVIGATION_SELECTORS);
+  const discoveredControls = controls.length;
+
+  // Click through each discovered control to cycle states
+  const statesVisited: string[] = [];
+  for (const control of Array.from(controls)) {
+    if (control instanceof HTMLElement) {
+      const label = control.getAttribute('aria-label')
+        || control.textContent?.trim().slice(0, 30)
+        || control.tagName;
+      control.click();
+      await waitForTimeout(300);
+      statesVisited.push(label);
+    }
+  }
+
+  return {
+    passed: true,
+    metadata: {
+      discoveredControls,
+      statesVisited,
+    },
+  };
 }
 
 async function handleKeypress(step: TestStep, timeout: number): Promise<ActionResult> {

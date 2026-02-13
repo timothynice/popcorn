@@ -363,6 +363,41 @@ describe('actions', () => {
     expect(result.passed).toBe(true);
   });
 
+  it('screenshot with multi-state-discovery name discovers navigation controls', async () => {
+    document.body.innerHTML = `
+      <div class="slide">Main content</div>
+      <div role="tab">Tab 1</div>
+      <div role="tab">Tab 2</div>
+      <button aria-label="Next slide">→</button>
+    `;
+
+    const step: TestStep = {
+      stepNumber: 1,
+      action: 'screenshot',
+      description: 'Discover states',
+      name: 'multi-state-discovery',
+    };
+
+    const result = await executeAction(step);
+
+    expect(result.passed).toBe(true);
+    expect(result.metadata).toBeDefined();
+    expect(result.metadata!.discoveredControls).toBeGreaterThan(0);
+  });
+
+  it('screenshot without multi-state-discovery still returns simple success', async () => {
+    const step: TestStep = {
+      stepNumber: 1,
+      action: 'screenshot',
+      description: 'Take screenshot',
+    };
+
+    const result = await executeAction(step);
+
+    expect(result.passed).toBe(true);
+    expect(result.metadata).toBeUndefined();
+  });
+
   it('handles fallback selector', async () => {
     document.body.innerHTML = '<button class="fallback-btn">Click</button>';
 
