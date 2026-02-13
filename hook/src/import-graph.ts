@@ -279,28 +279,33 @@ export function detectNavigationControl(
   source: string,
   _arrayName: string,
 ): NavigationControl {
-  // Priority 1: ProgressBar / dots with onNavigate or similar handler
+  // Priority 1: Keyboard navigation (most reliable — works regardless of DOM structure)
+  // Check for keyboard event handlers, useEffect with key listeners, or navigation hooks
+  if (/ArrowRight|ArrowDown|useSlideNavigation|useKeyboard/i.test(source)) {
+    return {
+      type: 'keypress',
+      key: 'ArrowRight',
+    };
+  }
+
+  // Priority 2: ProgressBar / dots with onNavigate or similar handler
+  // The selector template covers multiple common patterns:
+  //   - data-slide-index attribute (explicit)
+  //   - .progress-dot class (common naming)
+  //   - Generic nav/progress button containers (Tailwind/generic apps)
   if (/onNavigate|onDotClick|onIndicatorClick/i.test(source)) {
     return {
       type: 'indexed-click',
       selectorTemplate:
-        '[data-slide-index="{index}"], .progress-dot:nth-child({n})',
+        '[data-slide-index="{index}"], .progress-dot:nth-child({n}), nav button:nth-child({n}), [class*="progress"] button:nth-child({n}), [role="tablist"] button:nth-child({n})',
     };
   }
 
-  // Priority 2: Next/prev button
+  // Priority 3: Next/prev button
   if (/onClick=\{[^}]*(next|forward|goNext)/i.test(source)) {
     return {
       type: 'sequential-click',
       nextSelector: 'button',
-    };
-  }
-
-  // Priority 3: Keyboard navigation
-  if (/ArrowRight|ArrowDown/.test(source)) {
-    return {
-      type: 'keypress',
-      key: 'ArrowRight',
     };
   }
 
@@ -340,9 +345,11 @@ export function resolveNavigationSteps(
 
   if (hint.type === 'array') {
     if (control?.type === 'indexed-click') {
-      const selector = control.selectorTemplate
-        .replace('{index}', String(hint.index))
-        .replace('{n}', String(hint.index + 1));
+      const replaceTokens = (tpl: string) =>
+        tpl
+          .replace(/\{index\}/g, String(hint.index))
+          .replace(/\{n\}/g, String(hint.index + 1));
+      const selector = replaceTokens(control.selectorTemplate);
       return [
         {
           stepNumber: 0,

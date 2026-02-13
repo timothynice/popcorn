@@ -280,6 +280,28 @@ export default function Deck() {
     }
   });
 
+  it('prefers keyboard navigation when both onNavigate and ArrowRight are present', () => {
+    const source = `
+const SLIDES = [SlideA, SlideB, SlideC];
+export default function Deck() {
+  const { currentSlide, goTo } = useSlideNavigation(SLIDES.length);
+  return (
+    <div>
+      {SLIDES[currentSlide]}
+      <ProgressBar onNavigate={(i) => goTo(i)} />
+    </div>
+  );
+}`;
+
+    const control = detectNavigationControl(source, 'SLIDES');
+
+    // Keyboard navigation should take priority over indexed-click
+    expect(control.type).toBe('keypress');
+    if (control.type === 'keypress') {
+      expect(control.key).toBe('ArrowRight');
+    }
+  });
+
   it('detects next/prev button pattern', () => {
     const source = `
 const SLIDES = [SlideA, SlideB];
