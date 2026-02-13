@@ -386,17 +386,26 @@ describe('resolveNavigationSteps', () => {
     expect(steps[0].selector).toContain('nth-child(3)');
   });
 
-  it('generates repeated keypress steps for array hint with keypress control', () => {
+  it('generates repeated keypress steps with waits for array hint with keypress control', () => {
     const hint: NavigationHint = { type: 'array', index: 3, arrayName: 'SLIDES', totalItems: 5 };
     const control: NavigationControl = { type: 'keypress', key: 'ArrowRight' };
 
     const steps = resolveNavigationSteps(hint, 'http://localhost:3000', control, 'SlideProduct');
 
-    expect(steps).toHaveLength(3);
-    for (const step of steps) {
-      expect(step.action).toBe('keypress');
+    // 3 keypresses with 2 waits between them: key, wait, key, wait, key
+    expect(steps).toHaveLength(5);
+
+    const keypressSteps = steps.filter(s => s.action === 'keypress');
+    expect(keypressSteps).toHaveLength(3);
+    for (const step of keypressSteps) {
       expect(step.key).toBe('ArrowRight');
       expect(step.stepNumber).toBe(0);
+    }
+
+    const waitSteps = steps.filter(s => s.action === 'wait');
+    expect(waitSteps).toHaveLength(2);
+    for (const step of waitSteps) {
+      expect(step.timeout).toBe(400);
     }
   });
 
@@ -407,18 +416,25 @@ describe('resolveNavigationSteps', () => {
     expect(steps).toHaveLength(0);
   });
 
-  it('generates repeated sequential clicks for array with sequential control', () => {
+  it('generates repeated sequential clicks with waits for array with sequential control', () => {
     const hint: NavigationHint = { type: 'array', index: 2, arrayName: 'SLIDES', totalItems: 4 };
     const control: NavigationControl = { type: 'sequential-click', nextSelector: 'button' };
 
     const steps = resolveNavigationSteps(hint, 'http://localhost:3000/', control, 'SlideProduct');
 
-    expect(steps).toHaveLength(2);
-    for (const step of steps) {
-      expect(step.action).toBe('click');
+    // 2 clicks with 1 wait between them: click, wait, click
+    expect(steps).toHaveLength(3);
+
+    const clickSteps = steps.filter(s => s.action === 'click');
+    expect(clickSteps).toHaveLength(2);
+    for (const step of clickSteps) {
       expect(step.selector).toBe('button');
       expect(step.stepNumber).toBe(0);
     }
+
+    const waitSteps = steps.filter(s => s.action === 'wait');
+    expect(waitSteps).toHaveLength(1);
+    expect(waitSteps[0].timeout).toBe(400);
   });
 });
 

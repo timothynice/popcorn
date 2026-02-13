@@ -13,6 +13,14 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { TestStep } from '@popcorn/shared';
 
+/**
+ * Delay (ms) inserted between sequential navigation actions (keypresses,
+ * next-button clicks) to let transition animations complete. Most slide
+ * decks, carousels, and tab components have animation guards (typically
+ * 200–400ms) that ignore rapid input.
+ */
+const TRANSITION_WAIT_MS = 400;
+
 // ── Types ──────────────────────────────────────────────────────────────
 
 /** A file that imports the target component. */
@@ -369,6 +377,16 @@ export function resolveNavigationSteps(
           description: `Click next (${i + 1}/${hint.index})`,
           selector: control.nextSelector,
         });
+        // Wait for transition animations between clicks
+        if (i < hint.index - 1) {
+          steps.push({
+            stepNumber: 0,
+            action: 'wait',
+            description: 'Wait for transition',
+            condition: 'timeout',
+            timeout: TRANSITION_WAIT_MS,
+          });
+        }
       }
       return steps;
     }
@@ -383,6 +401,18 @@ export function resolveNavigationSteps(
         description: `Press ${key} (${i + 1}/${hint.index})`,
         key,
       });
+      // Wait for transition animations between keypresses —
+      // most slide/carousel/tab components have animation guards
+      // that ignore rapid input (typically 200-400ms).
+      if (i < hint.index - 1) {
+        steps.push({
+          stepNumber: 0,
+          action: 'wait',
+          description: 'Wait for transition',
+          condition: 'timeout',
+          timeout: TRANSITION_WAIT_MS,
+        });
+      }
     }
     return steps;
   }
