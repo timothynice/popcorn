@@ -28,6 +28,12 @@ export type NavigationHint =
   | { type: 'conditional'; stateVar: string; value: string }
   | { type: 'direct' };
 
+/** How to navigate between items in an array-rendered component. */
+export type NavigationControl =
+  | { type: 'indexed-click'; selectorTemplate: string }
+  | { type: 'sequential-click'; nextSelector: string }
+  | { type: 'keypress'; key: string };
+
 /** Result of analyzing a component's rendering context. */
 export interface ComponentContext {
   hint: NavigationHint;
@@ -256,6 +262,166 @@ function detectConditionalRendering(
       type: 'conditional',
       stateVar: match[1],
       value: match[2],
+    };
+  }
+
+  return null;
+}
+
+// ── detectNavigationControl ──────────────────────────────────────────
+
+/**
+ * Detects the navigation control pattern in a parent component's source.
+ * Looks for ProgressBar/dots, next/prev buttons, or keyboard navigation.
+ * Returns a fallback keypress control if nothing specific is detected.
+ */
+export function detectNavigationControl(
+  source: string,
+  _arrayName: string,
+): NavigationControl {
+  // Priority 1: ProgressBar / dots with onNavigate or similar handler
+  if (/onNavigate|onDotClick|onIndicatorClick/i.test(source)) {
+    return {
+      type: 'indexed-click',
+      selectorTemplate:
+        '[data-slide-index="{index}"], .progress-dot:nth-child({n})',
+    };
+  }
+
+  // Priority 2: Next/prev button
+  if (/onClick=\{[^}]*(next|forward|goNext)/i.test(source)) {
+    return {
+      type: 'sequential-click',
+      nextSelector: 'button',
+    };
+  }
+
+  // Priority 3: Keyboard navigation
+  if (/ArrowRight|ArrowDown/.test(source)) {
+    return {
+      type: 'keypress',
+      key: 'ArrowRight',
+    };
+  }
+
+  // Default fallback
+  return {
+    type: 'keypress',
+    key: 'ArrowRight',
+  };
+}
+
+// ── resolveNavigationSteps ───────────────────────────────────────────
+
+/**
+ * Converts a NavigationHint + NavigationControl into concrete TestStep[]
+ * that navigate to the correct page/state before the visual check.
+ *
+ * All steps use stepNumber 0; the caller re-numbers them.
+ */
+export function resolveNavigationSteps(
+  hint: NavigationHint,
+  baseUrl: string,
+  control: NavigationControl | null,
+  _componentName: string,
+): TestStep[] {
+  const normalizedBase = baseUrl.replace(/\/+$/, '');
+
+  if (hint.type === 'route') {
+    return [
+      {
+        stepNumber: 0,
+        action: 'navigate',
+        description: `Navigate to ${hint.path}`,
+        target: `${normalizedBase}${hint.path}`,
+      },
+    ];
+  }
+
+  if (hint.type === 'array') {
+    if (control?.type === 'indexed-click') {
+      const selector = control.selectorTemplate
+        .replace('{index}', String(hint.index))
+        .replace('{n}', String(hint.index + 1));
+      return [
+        {
+          stepNumber: 0,
+          action: 'click',
+          description: `Click slide index ${hint.index}`,
+          selector,
+        },
+      ];
+    }
+
+    if (control?.type === 'sequential-click') {
+      const steps: TestStep[] = [];
+      for (let i = 0; i < hint.index; i++) {
+        steps.push({
+          stepNumber: 0,
+          action: 'click',
+          description: `Click next (${i + 1}/${hint.index})`,
+          selector: control.nextSelector,
+        });
+      }
+      return steps;
+    }
+
+    // keypress control or null control — press N times
+    const key = control?.type === 'keypress' ? control.key : 'ArrowRight';
+    const steps: TestStep[] = [];
+    for (let i = 0; i < hint.index; i++) {
+      steps.push({
+        stepNumber: 0,
+        action: 'keypress',
+        description: `Press ${key} (${i + 1}/${hint.index})`,
+        key,
+      });
+    }
+    return steps;
+  }
+
+  // conditional and direct: can't reliably navigate
+  return [];
+}
+
+// ── analyzeComponentContext ──────────────────────────────────────────
+
+/**
+ * High-level orchestrator: given a component file path, finds its parent,
+ * detects the rendering pattern, and resolves navigation steps.
+ *
+ * Returns null if no importer is found or no rendering pattern is detected.
+ */
+export async function analyzeComponentContext(
+  filePath: string,
+  projectRoot: string,
+  baseUrl: string,
+): Promise<ComponentContext | null> {
+  const componentName = path.basename(filePath, path.extname(filePath));
+
+  const importers = await findImporters(filePath, projectRoot);
+  if (importers.length === 0) return null;
+
+  for (const importer of importers) {
+    const hint = detectRenderingPattern(importer.source, componentName);
+    if (!hint) continue;
+
+    let control: NavigationControl | null = null;
+    if (hint.type === 'array') {
+      control = detectNavigationControl(importer.source, hint.arrayName);
+    }
+
+    const navigationSteps = resolveNavigationSteps(
+      hint,
+      baseUrl,
+      control,
+      componentName,
+    );
+
+    return {
+      hint,
+      parentFilePath: importer.filePath,
+      navigationSteps,
     };
   }
 
