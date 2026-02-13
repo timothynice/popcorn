@@ -104,16 +104,19 @@ async function main(): Promise<void> {
     log.info(`No matching test plan for '${baseName}', generating one...`);
 
     const generatedPlan = await generatePlanFromFile(absFilePath, {
-      baseUrl: '/',
+      baseUrl: config.baseUrl ?? '/',
+      projectRoot,
     });
 
     if (!generatedPlan) {
-      log.info(`No interactive elements detected in '${baseName}', skipping`);
+      // Should not happen — generator now always returns a plan
+      log.info(`Could not generate plan for '${baseName}', skipping`);
       return;
     }
 
+    const isVisualCheck = generatedPlan.tags?.includes('visual-check');
     const savedPath = await savePlan(generatedPlan, testPlansDir);
-    log.info(`Generated test plan saved: ${savedPath}`);
+    log.info(`Generated ${isVisualCheck ? 'visual-check' : 'test'} plan saved: ${savedPath}`);
     planName = generatedPlan.planName;
   }
 
@@ -121,9 +124,21 @@ async function main(): Promise<void> {
   const testPlan = await loadTestPlan(planName, testPlansDir);
   const acceptanceCriteria = await loadCriteria(planName, testPlansDir);
 
+  // Resolve relative baseUrl against config.baseUrl
+  if (config.baseUrl && testPlan.baseUrl) {
+    try {
+      new URL(testPlan.baseUrl);
+      // Already absolute — keep it
+    } catch {
+      // Relative — resolve against config.baseUrl
+      testPlan.baseUrl = new URL(testPlan.baseUrl, config.baseUrl).href;
+    }
+  }
+
   log.info(`Dispatching test plan '${planName}'`, {
     triggeredBy: filePath,
     steps: testPlan.steps.length,
+    baseUrl: testPlan.baseUrl,
   });
 
   // Connect to the extension and dispatch the demo
@@ -145,7 +160,17 @@ async function main(): Promise<void> {
 
     printSummary(result, evaluation);
   } catch (err) {
-    log.error('Demo dispatch failed', { error: (err as Error).message });
+    const errorMsg = (err as Error).message;
+    log.error('Demo dispatch failed', { error: errorMsg });
+
+    // Provide actionable guidance for the most common failure
+    if (errorMsg.includes('No web page open') || errorMsg.includes('No active tab')) {
+      log.info('');
+      log.info('Tip: Make sure your app is open and its tab is active in Chrome.');
+      log.info('     Popcorn runs demos on the currently active tab.');
+      log.info('     Or set "baseUrl" in popcorn.config.json to auto-navigate');
+      log.info('     (e.g. "http://localhost:3000").');
+    }
   } finally {
     client.disconnect();
   }

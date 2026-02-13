@@ -12,6 +12,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { TestPlan, TestStep } from '@popcorn/shared';
+import { analyzeComponentContext } from './import-graph.js';
 
 /** An interactive element detected in source code. */
 export interface DetectedElement {
@@ -35,28 +36,30 @@ const PLACEHOLDER_VALUES: Record<string, string> = {
 
 /**
  * Generates a test plan from a source file by analyzing its JSX/HTML patterns.
- * Returns null if no interactive elements are detected.
+ * For interactive components, generates interaction steps (fill, click, etc.).
+ * For display-only components, generates a visual-check plan (screenshot capture).
  */
 export async function generatePlanFromFile(
   filePath: string,
-  options?: { baseUrl?: string },
+  options?: { baseUrl?: string; projectRoot?: string },
 ): Promise<TestPlan | null> {
   const content = await fs.readFile(filePath, 'utf-8');
   const elements = detectElements(content);
-
-  if (elements.length === 0) {
-    return null;
-  }
 
   const baseName = path.basename(filePath, path.extname(filePath));
   const planName = toKebabCase(baseName);
   const baseUrl = options?.baseUrl ?? '/';
 
+  // No interactive elements — generate a visual-check plan
+  if (elements.length === 0) {
+    return buildVisualCheckPlan(filePath, planName, baseName, baseUrl, options?.projectRoot);
+  }
+
   const steps = buildSteps(elements, baseUrl);
 
   if (steps.length <= 1) {
-    // Only a navigate step — not useful
-    return null;
+    // Only a navigate step — fall back to visual-check
+    return buildVisualCheckPlan(filePath, planName, baseName, baseUrl, options?.projectRoot);
   }
 
   return {
@@ -65,6 +68,83 @@ export async function generatePlanFromFile(
     baseUrl,
     steps,
     tags: ['auto-generated'],
+  };
+}
+
+/**
+ * Builds a visual-check plan, optionally enriched with navigation steps
+ * from static import graph analysis when projectRoot is provided.
+ */
+async function buildVisualCheckPlan(
+  filePath: string,
+  planName: string,
+  baseName: string,
+  baseUrl: string,
+  projectRoot?: string,
+): Promise<TestPlan> {
+  const steps: TestStep[] = [];
+  let tags = ['auto-generated', 'visual-check'];
+  let stepNum = 1;
+
+  // Try static import graph analysis for navigation context
+  if (projectRoot) {
+    const ctx = await analyzeComponentContext(filePath, projectRoot, baseUrl);
+    if (ctx && ctx.navigationSteps.length > 0) {
+      // Add navigate to baseUrl first
+      steps.push({
+        stepNumber: stepNum++,
+        action: 'navigate',
+        description: 'Open app',
+        target: baseUrl,
+      });
+      steps.push({
+        stepNumber: stepNum++,
+        action: 'wait',
+        description: 'Wait for page load',
+        condition: 'timeout',
+        timeout: 500,
+      });
+
+      // Add navigation steps from import graph analysis
+      for (const navStep of ctx.navigationSteps) {
+        steps.push({ ...navStep, stepNumber: stepNum++ });
+      }
+      steps.push({
+        stepNumber: stepNum++,
+        action: 'wait',
+        description: 'Wait for transition',
+        condition: 'timeout',
+        timeout: 500,
+      });
+
+      tags = [...tags, 'navigated'];
+    }
+  }
+
+  // If no navigation steps were added, use simple wait
+  if (steps.length === 0) {
+    steps.push({
+      stepNumber: stepNum++,
+      action: 'wait',
+      description: 'Wait for page to render',
+      condition: 'timeout',
+      timeout: 1000,
+    });
+  }
+
+  // Always end with screenshot
+  steps.push({
+    stepNumber: stepNum++,
+    action: 'screenshot',
+    description: `Capture visual state of ${baseName}`,
+  });
+
+  return {
+    planName,
+    description: `Visual check for ${baseName}`,
+    baseUrl,
+    steps,
+    tags,
   };
 }
 

@@ -213,13 +213,42 @@ export function LoginForm() {
     expect(actions).toContain('click');
   });
 
-  it('returns null for a utility file with no UI elements', async () => {
+  it('generates visual-check plan for a file with no interactive elements', async () => {
     const utilFile = `export const add = (a: number, b: number) => a + b;\nexport const PI = 3.14;\n`;
     const filePath = path.join(tmpDir, 'utils.ts');
     await fs.writeFile(filePath, utilFile);
 
     const plan = await generatePlanFromFile(filePath);
-    expect(plan).toBeNull();
+    expect(plan).not.toBeNull();
+    expect(plan!.tags).toContain('visual-check');
+    expect(plan!.tags).toContain('auto-generated');
+    expect(plan!.steps).toHaveLength(2);
+    expect(plan!.steps[0].action).toBe('wait');
+    expect(plan!.steps[1].action).toBe('screenshot');
+  });
+
+  it('generates visual-check plan for a display-only component', async () => {
+    const displayComponent = `
+import React from 'react';
+export function ProductCard({ title, price }) {
+  return (
+    <div className="card">
+      <h2>{title}</h2>
+      <p className="price">{price}</p>
+    </div>
+  );
+}`;
+    const filePath = path.join(tmpDir, 'ProductCard.tsx');
+    await fs.writeFile(filePath, displayComponent);
+
+    const plan = await generatePlanFromFile(filePath);
+    expect(plan).not.toBeNull();
+    expect(plan!.planName).toBe('product-card');
+    expect(plan!.description).toBe('Visual check for ProductCard');
+    expect(plan!.tags).toContain('visual-check');
+    expect(plan!.steps).toHaveLength(2);
+    expect(plan!.steps[0].action).toBe('wait');
+    expect(plan!.steps[1].action).toBe('screenshot');
   });
 
   it('uses email placeholder for email inputs', async () => {
@@ -248,6 +277,41 @@ export function LoginForm() {
 
     const plan = await generatePlanFromFile(filePath, { baseUrl: '/settings' });
     expect(plan!.steps[0].target).toBe('/settings');
+  });
+
+  it('prepends navigation steps for array-rendered component', async () => {
+    // Create a component and a parent that renders it in an array
+    await fs.mkdir(path.join(tmpDir, 'slides'), { recursive: true });
+    const slideSrc = `export default function SlideTwo() { return <div>Slide 2</div>; }`;
+    await fs.writeFile(path.join(tmpDir, 'slides', 'SlideTwo.tsx'), slideSrc);
+
+    const parentSrc = [
+      `import SlideOne from './slides/SlideOne';`,
+      `import SlideTwo from './slides/SlideTwo';`,
+      `import SlideThree from './slides/SlideThree';`,
+      `const SLIDES = [SlideOne, SlideTwo, SlideThree];`,
+      `<ProgressBar onNavigate={(i) => go(i)} />`,
+    ].join('\n');
+    await fs.writeFile(path.join(tmpDir, 'Index.tsx'), parentSrc);
+
+    const plan = await generatePlanFromFile(
+      path.join(tmpDir, 'slides', 'SlideTwo.tsx'),
+      { baseUrl: 'http://localhost:8080', projectRoot: tmpDir },
+    );
+
+    expect(plan).not.toBeNull();
+    expect(plan!.tags).toContain('visual-check');
+    expect(plan!.tags).toContain('navigated');
+
+    // Should have: navigate → wait → click (navigate to slide) → wait → screenshot
+    const actions = plan!.steps.map((s) => s.action);
+    expect(actions).toContain('navigate');
+    expect(actions).toContain('click');
+    expect(actions).toContain('screenshot');
+
+    // The click step should target the second item (index 1, nth-child(2))
+    const clickStep = plan!.steps.find((s) => s.action === 'click');
+    expect(clickStep!.selector).toContain('2');
   });
 });
 
