@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Popcorn is an autonomous UI testing tool combining a Chrome extension and a Claude Code hook. When the AI modifies frontend code, Popcorn automatically runs a visual demo in the browser, captures a video replay, and presents a structured summary. See `popcorn_prd.md` for the full product requirements.
 
-**Status:** Core implementation complete with HTTP bridge and route-aware visual testing. All three packages (shared, extension, hook) are built with 307 passing tests across 23 test files. The hook communicates with the extension via an HTTP bridge server on localhost (ports 7890-7899), with file-based IPC as automatic fallback. The Chrome extension background polls the hook via `chrome.alarms` + `fetch()`, with hook connection status shown in the popup UI. A `popcorn init` CLI scaffolds new projects automatically. Screenshots are captured automatically during demo runs; video recording requires a user gesture via the popup's "Re-run with Recording" button.
+**Status:** Core implementation complete with HTTP bridge and route-aware visual testing. All three packages (shared, extension, hook) are built with 318 passing tests across 24 test files. The hook communicates with the extension via an HTTP bridge server on localhost (ports 7890-7899), with file-based IPC as automatic fallback. The Chrome extension background polls the hook via `chrome.alarms` + `fetch()`, with hook connection status shown in the popup UI. A `popcorn init` CLI scaffolds new projects automatically. Screenshots are captured automatically during demo runs; video recording requires a user gesture via the popup's "Re-run with Recording" button.
 
 ## Build & Development Commands
 
@@ -26,7 +26,7 @@ The system has two main components that communicate via HTTP bridge (localhost):
 ```
 Claude Code Hook (hook/)          Chrome Extension (extension/)
   │                                  │
-  │ watches src/frontend/ for        │ content script: injects test
+  │ watches configured watchDir for   │ content script: injects test
   │ .js/.ts/.jsx/.tsx changes        │   harness, executes batched ops
   │                                  │
   │ BridgeServer on localhost:7890   │ bridge-client.ts polls via fetch()
@@ -46,7 +46,7 @@ Claude Code Hook (hook/)          Chrome Extension (extension/)
 - **`test-plans/`** — JSON files defining batched browser operations (click, fill, navigate, screenshot)
 - **`test-plans/presets/`** — Preset acceptance criteria for common flows (forms, navigation, authentication)
 - **`tapes/`** — Video recordings and structured test reports (git-ignored)
-- **`src/frontend/`** — Target directory watched by the hook for UI changes
+- **`src/frontend/`** — Default target directory watched by the hook (configurable via `watchDir` in `popcorn.config.json`)
 - **`docs/plans/`** — Implementation plans and architecture documentation
 
 ### Data Flow
@@ -67,7 +67,7 @@ Claude Code Hook (hook/)          Chrome Extension (extension/)
 - **npm workspaces** monorepo (`shared`, `extension`, `hook`)
 - **React 18** for extension popup UI, using built-in state hooks (no third-party state libraries)
 - **CSS Modules** (`*.module.css`) with camelCased class names
-- **Vite** for extension build (multi-entry: background IIFE, content IIFE, popup React app)
+- **Vite** for extension build (multi-entry: background ES module, content ES module, offscreen ES module, popup React app)
 - **Vitest** for testing with `environmentMatchGlobs` (jsdom for extension, node for hook/shared)
 - **Chrome Extension Manifest V3**, requires Chrome 123+
 - **MediaRecorder API** + Chrome **Offscreen API** + `chrome.tabCapture` for video/screenshot capture
@@ -80,7 +80,7 @@ Claude Code Hook (hook/)          Chrome Extension (extension/)
 
 ## Extension Permissions
 
-Only request: `activeTab`, `storage`, `scripting`, `tabCapture`, `offscreen`, `alarms`. Uses `host_permissions` for `http://localhost/*`, `https://localhost/*`, `http://127.0.0.1/*` to enable programmatic `captureVisibleTab` and `scripting.executeScript`. All recordings and test data stay local — no external API calls or cloud storage.
+Only request: `activeTab`, `tabs`, `storage`, `scripting`, `tabCapture`, `offscreen`, `alarms`. Uses `host_permissions: ["<all_urls>"]` to enable programmatic `captureVisibleTab` and `scripting.executeScript` on any page. All recordings and test data stay local — no external API calls or cloud storage.
 
 ## Key Modules
 
@@ -100,7 +100,9 @@ Only request: `activeTab`, `storage`, `scripting`, `tabCapture`, `offscreen`, `a
 - `background/demo-orchestrator.ts` — `handleStartDemo()` orchestration, `assembleDemoResult()` (extracts screenshots from step results)
 - `background/external-messaging.ts` — `initExternalMessaging()` for Chrome external messaging
 - `background/bridge-client.ts` — `initBridgePolling()`, `discoverHookPort()`, `pollForMessages()`, `sendResult()` — polls hook HTTP server via `chrome.alarms` + `fetch()`
+- `background/offscreen-manager.ts` — Manages offscreen document lifecycle for video recording
 - `capture/recorder.ts` — `Recorder` class (MediaRecorder + Offscreen API + tabCapture, vp9/vp8)
+- `capture/offscreen-recorder.ts` — Offscreen document entry point for MediaRecorder capture
 - `capture/screenshot.ts` — `captureScreenshot()` via `chrome.tabs.captureVisibleTab`
 - `storage/tape-store.ts` — `TapeStore` (IndexedDB) + `MockTapeStore` (testing). `TapeRecord` includes optional `testPlan` for re-run capability.
 - `popup/` — React dashboard with TapeList, TapeCard, TapeDetail (with "Re-run with Recording" button), StatusBar, CriteriaEditor
@@ -112,6 +114,9 @@ Only request: `activeTab`, `storage`, `scripting`, `tabCapture`, `offscreen`, `a
 - `extension-client.ts` — `ExtensionClient` with HTTP-first transport (BridgeServer) and automatic file-based IPC fallback (Messenger), `startDemo()` → `Promise<DemoResult>`, `getTransport()` for observability
 - `plan-loader.ts` — `loadTestPlan()`, `listTestPlans()` with validation
 - `plan-generator.ts` — `generatePlanFromFile()` template-based test plan generator, `detectElements()`, `buildSteps()`, `savePlan()`
+- `criteria-loader.ts` — `loadCriteria()` loads acceptance criteria for a test plan
+- `import-graph.ts` — Import graph analysis: `detectNavigationControl()`, `resolveNavigationSteps()` for route-aware visual testing
+- `logger.ts` — `createLogger()` for prefixed console output (`[Popcorn]`)
 - `config.ts` — `PopcornConfig`, `loadConfig()`, `loadConfigFromFile()`, `getDefaultConfig()`
 - `commands/init.ts` — `runInit()` CLI scaffolding, `detectWatchDir()`, `scanAndGeneratePlans()`, `mergeClaudeSettings()`
 - `cli.ts` — CLI entry point (`npx popcorn init`)

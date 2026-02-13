@@ -6,13 +6,13 @@
  * (`PostToolUse` for Edit/Write tools). It reads the hook event from stdin,
  * checks if the changed file is in the watched directory or has the
  * popcorn-test marker, and if so, dispatches a demo to the extension
- * via the file-based IPC messenger.
+ * via HTTP bridge (with file-based IPC fallback).
  *
- * Usage in .claude/settings.local.json hooks:
+ * Set up automatically by `popcorn init`. Usage in .claude/settings.local.json:
  *   "hooks": {
  *     "PostToolUse": [{
  *       "matcher": "Edit|Write",
- *       "command": "node --loader ts-node/esm hook/src/claude-hook-runner.ts"
+ *       "hooks": [{ "type": "command", "command": "node /path/to/hook/dist/claude-hook-runner.js", "timeout": 30, "async": true }]
  *     }]
  *   }
  */
