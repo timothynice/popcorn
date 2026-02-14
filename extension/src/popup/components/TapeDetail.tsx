@@ -34,6 +34,7 @@ export function TapeDetail({ tape }: TapeDetailProps) {
   const [isRerunning, setIsRerunning] = useState(false);
   const [rerunError, setRerunError] = useState<string | null>(null);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+  const [showCopiedFeedback, setShowCopiedFeedback] = useState(false);
 
   const passedSteps = tape.steps.filter((s) => s.passed).length;
   const totalSteps = tape.steps.length;
@@ -77,6 +78,48 @@ export function TapeDetail({ tape }: TapeDetailProps) {
     const index = tape.screenshots.findIndex((s) => s.dataUrl === dataUrl);
     if (index >= 0) {
       setLightboxIndex(index);
+    }
+  };
+
+  const handleExportScreenshots = () => {
+    downloadAllScreenshotsZip(tape.screenshots, tape.demoName);
+  };
+
+  const handleExportJSON = () => {
+    const data = {
+      id: tape.id,
+      testPlanId: tape.testPlanId,
+      timestamp: tape.timestamp,
+      duration: tape.duration,
+      passed: tape.passed,
+      summary: tape.summary,
+      steps: tape.steps,
+      criteriaResults: tape.criteriaResults,
+    };
+
+    const blob = new Blob([JSON.stringify(data, null, 2)], {
+      type: 'application/json',
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${tape.testPlanId}-${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleCopySummary = async () => {
+    const passedCount = tape.steps.filter((s) => s.passed).length;
+    const failedCount = tape.steps.length - passedCount;
+
+    const text = `# ${tape.testPlanId}\n${tape.summary || ''}\nSteps: ${tape.steps.length} (${passedCount} passed, ${failedCount} failed)\nDuration: ${formatDuration(tape.duration)}`;
+
+    try {
+      await navigator.clipboard.writeText(text);
+      setShowCopiedFeedback(true);
+      setTimeout(() => setShowCopiedFeedback(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy to clipboard:', err);
     }
   };
 
@@ -176,7 +219,30 @@ export function TapeDetail({ tape }: TapeDetailProps) {
           <p className={styles.summaryInline}>{tape.summary}</p>
         )}
 
-        {/* 6. Steps */}
+        {/* 6. Export section */}
+        <div className={styles.exportSection}>
+          <h3 className={styles.exportTitle}>Export</h3>
+          <div className={styles.exportButtons}>
+            <button
+              className={styles.exportButton}
+              onClick={handleExportScreenshots}
+              disabled={!tape.screenshots || tape.screenshots.length === 0}
+            >
+              {'\u2193'} Screenshots ZIP
+            </button>
+            <button className={styles.exportButton} onClick={handleExportJSON}>
+              {'\u2193'} Summary JSON
+            </button>
+            <button className={styles.exportButton} onClick={handleCopySummary}>
+              {'\u{1F4CB}'} Copy Summary
+              {showCopiedFeedback && (
+                <span className={styles.copiedFeedback}>Copied!</span>
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* 7. Steps */}
         <section className={styles.section}>
           <h3 className={styles.sectionTitle}>Steps</h3>
           <div className={styles.steps}>

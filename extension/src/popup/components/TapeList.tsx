@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useMemo } from 'react';
 import type { TapeRecord } from '@popcorn/shared';
 import { TapeCard } from './TapeCard';
 import styles from './TapeList.module.css';
@@ -12,6 +12,8 @@ interface TapeListProps {
   onRerun?: (tapeId: string) => void;
 }
 
+type FilterStatus = 'all' | 'passed' | 'failed';
+
 export function TapeList({
   tapes,
   isLoading,
@@ -20,6 +22,36 @@ export function TapeList({
   onSelectTape,
   onRerun,
 }: TapeListProps) {
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterStatus, setFilterStatus] = useState<FilterStatus>('all');
+
+  const filteredTapes = useMemo(() => {
+    let result = tapes;
+
+    // Text search filter
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      result = result.filter(
+        (tape) =>
+          tape.testPlanId.toLowerCase().includes(query) ||
+          (tape.summary && tape.summary.toLowerCase().includes(query))
+      );
+    }
+
+    // Status filter
+    if (filterStatus === 'passed') {
+      result = result.filter((tape) => tape.passed === true);
+    } else if (filterStatus === 'failed') {
+      result = result.filter((tape) => tape.passed === false);
+    }
+
+    return result;
+  }, [tapes, searchQuery, filterStatus]);
+
+  const handleFilterClick = (status: FilterStatus) => {
+    setFilterStatus(filterStatus === status ? 'all' : status);
+  };
+
   if (error) {
     return (
       <div className={styles.container}>
@@ -62,11 +94,45 @@ export function TapeList({
 
   return (
     <div className={styles.container}>
+      {tapes.length > 0 && (
+        <div className={styles.toolbar}>
+          <input
+            type="text"
+            className={styles.searchInput}
+            placeholder="Search tapes..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+          <div className={styles.filters}>
+            <button
+              className={`${styles.filterButton} ${
+                filterStatus === 'passed' ? styles.active : ''
+              } ${filterStatus === 'passed' ? styles.passed : ''}`}
+              onClick={() => handleFilterClick('passed')}
+            >
+              ✓ Passed
+            </button>
+            <button
+              className={`${styles.filterButton} ${
+                filterStatus === 'failed' ? styles.active : ''
+              } ${filterStatus === 'failed' ? styles.failed : ''}`}
+              onClick={() => handleFilterClick('failed')}
+            >
+              ✗ Failed
+            </button>
+          </div>
+          {(searchQuery.trim() || filterStatus !== 'all') && (
+            <div className={styles.count}>
+              {filteredTapes.length} of {tapes.length} tapes
+            </div>
+          )}
+        </div>
+      )}
       <div className={styles.list}>
         <h3 className={styles.sectionLabel}>Most Recent Test</h3>
-        {tapes.map((tape, index) => (
+        {filteredTapes.map((tape, index) => (
           <React.Fragment key={tape.id}>
-            {index === 1 && tapes.length > 1 && (
+            {index === 1 && filteredTapes.length > 1 && (
               <h3 className={styles.sectionLabel}>Previous Tests</h3>
             )}
             <TapeCard
