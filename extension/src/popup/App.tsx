@@ -35,9 +35,8 @@ function App() {
     setCurrentView('feed');
   };
 
-  /** Send start_demo and await the result. */
+  /** Send start_demo and close popup immediately. */
   const sendStartDemo = async (plan: TestPlan | ExplorationPlan, demoCriteria: string[]) => {
-    setDemoRunning(true);
     try {
       // ExplorationPlan has `targets`, TestPlan has `planName`
       const planName = 'planName' in plan ? plan.planName : `exploration-${plan.mode}`;
@@ -47,12 +46,13 @@ function App() {
         acceptanceCriteria: demoCriteria,
         triggeredBy: 'popup',
       });
-      await chrome.runtime.sendMessage(message);
-      window.close(); // Close popup so it doesn't overlay screenshots
+      // Fire-and-forget: don't await — background runs the demo async
+      // and sendMessage won't resolve until the entire demo finishes
+      chrome.runtime.sendMessage(message);
+      // Close popup immediately so it doesn't overlay screenshots
+      window.close();
     } catch (err) {
-      console.warn('[Popcorn] Demo failed:', err);
-    } finally {
-      setDemoRunning(false);
+      console.warn('[Popcorn] Demo send failed:', err);
     }
   };
 

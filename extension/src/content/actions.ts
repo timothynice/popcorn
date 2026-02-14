@@ -252,8 +252,8 @@ async function handleScroll(step: TestStep, timeout: number): Promise<ActionResu
     throw new Error('Scroll action requires selector or position');
   }
 
-  // Wait for scroll to complete
-  await waitForTimeout(100);
+  // Wait for smooth scroll animation to complete
+  await waitForTimeout(400);
   return { passed: true };
 }
 

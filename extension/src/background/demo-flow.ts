@@ -701,6 +701,17 @@ export async function runExplorationDemo(
       }
     }
 
+    // 4b. Navigate back to baseUrl for a clean final state
+    try {
+      const currentTab = await chrome.tabs.get(tabId);
+      if (currentTab.url !== plan.baseUrl) {
+        await navigateTab(tabId, plan.baseUrl);
+        await ensureContentScript(tabId);
+      }
+    } catch {
+      // Best-effort restore
+    }
+
     // 5. Final screenshot
     try {
       const finalDataUrl = await throttledScreenshot(tabId);
@@ -824,7 +835,8 @@ async function exploreElement(
     await ensureContentScript(tabId);
   }
 
-  // 7. Screenshot the new state
+  // 7. Screenshot the new state — wait for CSS animations to settle
+  await new Promise((r) => setTimeout(r, 300));
   try {
     const dataUrl = await throttledScreenshot(tabId);
     screenshotCaptures.push({
@@ -860,37 +872,48 @@ async function exploreElement(
   // 9. If URL changed, go back and verify
   if (urlChanged) {
     try {
-      await goBackTab(tabId);
-      results.push(makeStepResult(step++, 'go_back', 'Return via browser back', true));
-
-      await ensureContentScript(tabId);
-
-      // Verify page restored
-      const pageStateAfter = await sendSingleAction(tabId, {
-        stepNumber: step,
-        action: 'get_page_state',
-        description: 'Verify page restored',
-      });
-      step++;
-
-      const urlAfter = pageStateAfter.metadata?.url as string;
-      if (urlAfter !== urlBefore) {
-        // go_back didn't restore — fallback to direct navigation
-        console.warn(`[Popcorn] go_back didn't restore URL (got ${urlAfter}, expected ${urlBefore}), navigating directly`);
+      // Check if we landed on an extension or chrome:// page (e.g. PDF viewer)
+      const currentTab = await chrome.tabs.get(tabId);
+      const currentUrl = currentTab.url || '';
+      if (currentUrl.startsWith('chrome-extension://') || currentUrl.startsWith('chrome://')) {
+        // Can't inject content scripts into extension/chrome pages — navigate directly
         await navigateTab(tabId, urlBefore);
-        results.push(makeStepResult(step++, 'navigate', 'Fallback navigate to original page', true));
-      }
+        results.push(makeStepResult(step++, 'navigate', 'Return from extension page', true));
+        await ensureContentScript(tabId);
+      } else {
+        // Normal recovery: go_back, verify, wait
+        await goBackTab(tabId);
+        results.push(makeStepResult(step++, 'go_back', 'Return via browser back', true));
 
-      // Wait for DOM stability after returning
-      await ensureContentScript(tabId);
-      await sendSingleAction(tabId, {
-        stepNumber: step,
-        action: 'wait',
-        description: 'Wait for page restore',
-        condition: 'domStable',
-        timeout: 2000,
-      });
-      step++;
+        await ensureContentScript(tabId);
+
+        // Verify page restored
+        const pageStateAfter = await sendSingleAction(tabId, {
+          stepNumber: step,
+          action: 'get_page_state',
+          description: 'Verify page restored',
+        });
+        step++;
+
+        const urlAfter = pageStateAfter.metadata?.url as string;
+        if (urlAfter !== urlBefore) {
+          // go_back didn't restore — fallback to direct navigation
+          console.warn(`[Popcorn] go_back didn't restore URL (got ${urlAfter}, expected ${urlBefore}), navigating directly`);
+          await navigateTab(tabId, urlBefore);
+          results.push(makeStepResult(step++, 'navigate', 'Fallback navigate to original page', true));
+        }
+
+        // Wait for DOM stability after returning
+        await ensureContentScript(tabId);
+        await sendSingleAction(tabId, {
+          stepNumber: step,
+          action: 'wait',
+          description: 'Wait for page restore',
+          condition: 'domStable',
+          timeout: 2000,
+        });
+        step++;
+      }
     } catch (err) {
       console.warn('[Popcorn] Recovery after navigation failed:', err);
       // Try hard fallback: navigate directly to original URL
