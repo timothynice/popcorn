@@ -103,24 +103,24 @@ export function TapeList({
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
-          <div className={styles.filters}>
-            <button
-              className={`${styles.filterButton} ${
-                filterStatus === 'passed' ? styles.active : ''
-              } ${filterStatus === 'passed' ? styles.passed : ''}`}
-              onClick={() => handleFilterClick('passed')}
-            >
-              ✓ Passed
-            </button>
-            <button
-              className={`${styles.filterButton} ${
-                filterStatus === 'failed' ? styles.active : ''
-              } ${filterStatus === 'failed' ? styles.failed : ''}`}
-              onClick={() => handleFilterClick('failed')}
-            >
-              ✗ Failed
-            </button>
-          </div>
+          <button
+            className={`${styles.filterButton} ${
+              filterStatus === 'passed' ? styles.active : ''
+            } ${filterStatus === 'passed' ? styles.passed : ''}`}
+            onClick={() => handleFilterClick('passed')}
+            title="Filter passed"
+          >
+            ✓
+          </button>
+          <button
+            className={`${styles.filterButton} ${
+              filterStatus === 'failed' ? styles.active : ''
+            } ${filterStatus === 'failed' ? styles.failed : ''}`}
+            onClick={() => handleFilterClick('failed')}
+            title="Filter failed"
+          >
+            ✗
+          </button>
           {(searchQuery.trim() || filterStatus !== 'all') && (
             <div className={styles.count}>
               {filteredTapes.length} of {tapes.length} tapes

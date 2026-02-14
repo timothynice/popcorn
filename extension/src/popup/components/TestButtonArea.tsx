@@ -12,13 +12,13 @@ export function TestButtonArea({ onClick }: TestButtonAreaProps) {
         type="button"
         className={styles.button}
         onClick={onClick}
-        aria-label="Run test on current page"
-        title="Configure and run a test on the current page"
+        aria-label="Test this page"
+        title="Test this page"
       >
         <svg width="14" height="16" viewBox="0 0 10 12" fill="none" xmlns="http://www.w3.org/2000/svg">
           <path d="M1 1L9 6L1 11V1Z" fill="currentColor" />
         </svg>
-        Run Test
+        Test This Page
       </button>
     </div>
   );
