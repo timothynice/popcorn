@@ -256,7 +256,7 @@ export function TapeDetail({ tape }: TapeDetailProps) {
           </div>
         </section>
 
-        {/* 7. Criteria results */}
+        {/* 8. Criteria results */}
         {tape.criteriaResults && tape.criteriaResults.length > 0 && (
           <section className={styles.section}>
             <h3 className={styles.sectionTitle}>Criteria</h3>
@@ -281,7 +281,7 @@ export function TapeDetail({ tape }: TapeDetailProps) {
           </section>
         )}
 
-        {/* 8. Screenshots grid (if multiple — hero already shows primary image) */}
+        {/* 9. Screenshots grid (if multiple — hero already shows primary image) */}
         {tape.screenshots.length > 1 && (
           <section className={styles.section}>
             <div className={styles.screenshotHeader}>
