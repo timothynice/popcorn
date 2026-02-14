@@ -18,13 +18,26 @@
   align-items: center;
   gap: 6px;
   padding: 10px;
-  cursor: pointer;
   user-select: none;
   transition: background 0.1s ease;
 }
 
-.header:hover {
+.headerExpandable {
+  cursor: pointer;
+}
+
+.headerExpandable:hover {
   background: var(--bg-secondary);
+}
+
+.headerExpandable:active {
+  background: var(--bg-card);
+}
+
+.headerExpandable:focus-visible {
+  outline: 2px solid var(--accent-blue);
+  outline-offset: -2px;
+  border-radius: 4px;
 }
 
 .chevron {

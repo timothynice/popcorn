@@ -354,7 +354,7 @@ async function handleStartDemoMessage(
         {
           tapeStore,
           onTapeSaved: notifyTapeSaved,
-          skipRecording: true, // exploration demo manages its own screenshots
+          skipRecording: message.payload.triggeredBy !== 'popup',
         },
       );
 

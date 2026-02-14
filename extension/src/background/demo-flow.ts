@@ -654,6 +654,22 @@ export async function runExplorationDemo(
   let stepNum = 1;
   const startTime = Date.now();
 
+  // Start recording if available (popup-triggered demos have user gesture for tabCapture)
+  const recorder = new Recorder();
+  let recordingAvailable = false;
+  if (!deps.skipRecording) {
+    try {
+      await recorder.start(tabId);
+      recordingAvailable = true;
+      console.log(`[Popcorn] Exploration recording started for tab ${tabId}`);
+    } catch (err) {
+      console.warn(
+        '[Popcorn] Exploration recording unavailable, continuing without video:',
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+  }
+
   try {
     // 1. Navigate to base URL
     console.log(`[Popcorn] Exploration: navigating to ${plan.baseUrl}`);
@@ -745,9 +761,38 @@ export async function runExplorationDemo(
     const errMsg = err instanceof Error ? err.message : String(err);
     console.error('[Popcorn] Exploration demo failed:', errMsg);
     allResults.push(makeStepResult(stepNum++, 'navigate', 'Exploration failed', false, errMsg));
+    // Stop recorder on error path
+    if (recordingAvailable) {
+      try { await recorder.stop(); } catch { /* ignore */ }
+      recorder.reset();
+      recordingAvailable = false;
+    }
   }
 
-  // 6. Assemble result
+  // 6. Stop recording and collect video
+  let videoMetadata: VideoMetadata | null = null;
+  let videoBlob: Blob | null = null;
+  if (recordingAvailable) {
+    try {
+      const { blob, metadata } = await recorder.stop();
+      metadata.filename = `exploration-${plan.mode}-${Date.now()}.webm`;
+      if (blob.size > 0) {
+        videoMetadata = metadata;
+        videoBlob = blob;
+        console.log(`[Popcorn] Exploration recording stopped, ${blob.size} bytes captured`);
+      } else {
+        console.warn('[Popcorn] Exploration recording captured 0 bytes, discarding');
+      }
+    } catch (err) {
+      console.warn(
+        '[Popcorn] Failed to stop exploration recording:',
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+    recorder.reset();
+  }
+
+  // 7. Assemble result
   const duration = Date.now() - startTime;
   const passed = allResults.filter((r) => !r.passed).length === 0;
   const summary = passed
@@ -761,10 +806,10 @@ export async function runExplorationDemo(
     screenshots,
     duration,
     summary,
-    videoMetadata: null,
+    videoMetadata,
   };
 
-  // 7. Save tape
+  // 8. Save tape
   const testPlanForTape = {
     planName: `exploration-${plan.mode}`,
     description: `${plan.mode} exploration of ${plan.baseUrl}`,
@@ -779,7 +824,7 @@ export async function runExplorationDemo(
 
   // Use the first screenshot as thumbnail instead of capturing a new one
   const firstScreenshot = screenshots.length > 0 ? screenshots[0].dataUrl : null;
-  await saveTapeAndReload(demoResult, null, null, firstScreenshot, testPlanForTape, testPlanForTape.planName, tabId, deps);
+  await saveTapeAndReload(demoResult, videoBlob, videoMetadata, firstScreenshot, testPlanForTape, testPlanForTape.planName, tabId, deps);
 
   return demoResult;
 }

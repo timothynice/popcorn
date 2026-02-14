@@ -52,7 +52,7 @@ export function ExpandableStep({ step, onScreenshotClick }: ExpandableStepProps)
   return (
     <div className={`${styles.step} ${step.passed ? styles.stepPassed : styles.stepFailed}`}>
       <div
-        className={styles.header}
+        className={`${styles.header} ${hasExpandableContent ? styles.headerExpandable : ''}`}
         onClick={() => hasExpandableContent && setExpanded(!expanded)}
         role={hasExpandableContent ? 'button' : undefined}
         tabIndex={hasExpandableContent ? 0 : undefined}
