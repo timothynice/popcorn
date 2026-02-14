@@ -226,6 +226,7 @@ function findDismissButton(container: Element): string | undefined {
 
 /** Build a minimal selector for an element (for dismiss button targeting). */
 function buildQuickSelector(el: Element): string {
+  if (!el || !el.tagName) return 'unknown';
   if (el.id) return `#${el.id}`;
 
   const ariaLabel = el.getAttribute('aria-label');

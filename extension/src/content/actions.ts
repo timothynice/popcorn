@@ -149,7 +149,8 @@ async function handleClick(step: TestStep, timeout: number): Promise<ActionResul
 
   const urlAfter = window.location.href;
   const urlChanged = urlAfter !== urlBefore;
-  const modal = detectModalOrDialog();
+  let modal: ReturnType<typeof detectModalOrDialog> = null;
+  try { modal = detectModalOrDialog(); } catch { /* ignore detection errors */ }
 
   return {
     passed: true,
@@ -578,7 +579,12 @@ async function handleCheckActionability(step: TestStep): Promise<ActionResult> {
 }
 
 async function handleDismissModal(): Promise<ActionResult> {
-  const modal = detectModalOrDialog();
+  let modal: ReturnType<typeof detectModalOrDialog>;
+  try {
+    modal = detectModalOrDialog();
+  } catch {
+    return { passed: true, metadata: { dismissed: false, reason: 'detection_error' } };
+  }
   if (!modal) {
     return { passed: true, metadata: { dismissed: false, reason: 'no_modal' } };
   }

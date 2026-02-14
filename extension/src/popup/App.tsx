@@ -48,7 +48,7 @@ function App() {
         triggeredBy: 'popup',
       });
       await chrome.runtime.sendMessage(message);
-      refreshTapes();
+      window.close(); // Close popup so it doesn't overlay screenshots
     } catch (err) {
       console.warn('[Popcorn] Demo failed:', err);
     } finally {
