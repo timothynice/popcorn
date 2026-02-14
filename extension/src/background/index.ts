@@ -142,6 +142,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           .then((result) => sendResponse({ success: true, result }))
           .catch((err) => sendResponse({ success: false, error: err instanceof Error ? err.message : String(err) }));
         return true; // Keep channel open for async response
+      case 'scan_page':
+        handleScanPage()
+          .then((elements) => sendResponse({ success: true, elements }))
+          .catch((err) => sendResponse({ success: false, error: err instanceof Error ? err.message : String(err) }));
+        return true; // Keep channel open for async response
+      case 'get_tape_count':
+        ensureTapeStore()
+          .then(() => tapeStore.getAll())
+          .then((tapes) => sendResponse({ count: tapes.length }))
+          .catch(() => sendResponse({ count: 0 }));
+        return true;
+      case 'clear_tapes':
+        ensureTapeStore()
+          .then(() => tapeStore.clear())
+          .then(() => sendResponse({ success: true }))
+          .catch((err) => sendResponse({ success: false, error: err instanceof Error ? err.message : String(err) }));
+        return true;
       default:
         return false;
     }
@@ -178,6 +195,29 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return false;
   }
 });
+
+/**
+ * Scans the active tab's DOM for interactive elements.
+ * Injects page-scanner.ts via chrome.scripting.executeScript and returns results.
+ */
+async function handleScanPage() {
+  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tabs[0]?.id) {
+    throw new Error('No active tab found');
+  }
+
+  const tabId = tabs[0].id;
+  const results = await chrome.scripting.executeScript({
+    target: { tabId },
+    files: ['page-scanner.js'],
+  });
+
+  if (!results || results.length === 0 || !results[0].result) {
+    return [];
+  }
+
+  return results[0].result;
+}
 
 /**
  * Re-runs a previously saved demo with video recording enabled.
@@ -303,13 +343,13 @@ async function handleStartDemoMessage(
   }
 
   try {
-    // Run the full demo pipeline. Skip recording for hook-triggered demos
-    // (no user gesture available for tabCapture). Use updateStatus to avoid
-    // sending messages to the offscreen document.
+    // Record video when triggered from the popup (user gesture available for
+    // tabCapture). Skip recording for hook-triggered demos (no gesture).
+    const skipRecording = message.payload.triggeredBy !== 'popup';
     const demoResult = await runFullDemo(message, tabId, {
       tapeStore,
       onTapeSaved: notifyTapeSaved,
-      skipRecording: true,
+      skipRecording,
     });
 
     updateStatus('complete');

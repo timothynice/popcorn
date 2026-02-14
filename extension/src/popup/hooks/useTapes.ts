@@ -10,7 +10,7 @@ const activeObjectUrls = new Set<string>();
 function toSharedTapeRecord(stored: StoredTapeRecord): SharedTapeRecord {
   // Convert video blob to a playable object URL
   let videoUrl: string | null = null;
-  if (stored.videoBlob) {
+  if (stored.videoBlob && stored.videoBlob.size > 0) {
     videoUrl = URL.createObjectURL(stored.videoBlob);
     activeObjectUrls.add(videoUrl);
   }

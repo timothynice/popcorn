@@ -627,6 +627,48 @@ describe('demo-flow', () => {
     expect(chromeMock.tabs.reload).toHaveBeenCalledWith(1);
   });
 
+  it('includes step results for background navigate/wait steps', async () => {
+    const { store } = createMockTapeStore();
+
+    const plan = createTestPlan({
+      planName: 'nav-plan',
+      steps: [
+        { stepNumber: 1, action: 'navigate', description: 'Navigate to page', target: 'http://localhost:3000/about' },
+        { stepNumber: 2, action: 'wait', description: 'Wait for load', condition: 'timeout', timeout: 100 } as any,
+        { stepNumber: 3, action: 'click', description: 'Click button', selector: '#btn' },
+      ],
+    });
+
+    chromeMock.tabs.sendMessage.mockResolvedValue({
+      results: [
+        {
+          stepNumber: 3,
+          action: 'click',
+          description: 'Click button',
+          passed: true,
+          duration: 50,
+          timestamp: Date.now(),
+        },
+      ],
+    });
+
+    const message = createStartDemoMessage(plan);
+    const result = await runFullDemo(message, 1, { tapeStore: store });
+
+    // Navigate + wait + click = 3 step results total
+    expect(result.steps.length).toBeGreaterThanOrEqual(3);
+
+    // Background navigate step should be in the results
+    const navResult = result.steps.find((s) => s.action === 'navigate' && s.description === 'Navigate to page');
+    expect(navResult).toBeDefined();
+    expect(navResult!.passed).toBe(true);
+
+    // Background wait step should be in the results
+    const waitResult = result.steps.find((s) => s.action === 'wait');
+    expect(waitResult).toBeDefined();
+    expect(waitResult!.passed).toBe(true);
+  });
+
   it('captures screenshots from background for steps with needsBackgroundScreenshot marker', async () => {
     const { store } = createMockTapeStore();
 

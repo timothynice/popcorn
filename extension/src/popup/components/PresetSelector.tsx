@@ -44,11 +44,6 @@ const PRESETS: Preset[] = [
       'Protected pages redirect unauthenticated users to login',
     ],
   },
-  {
-    id: 'custom',
-    name: 'Custom',
-    criteria: [],
-  },
 ];
 
 export function PresetSelector({ onSelect }: PresetSelectorProps) {
@@ -64,24 +59,38 @@ export function PresetSelector({ onSelect }: PresetSelectorProps) {
     }
   };
 
+  const handleClear = () => {
+    setSelectedPresetId('');
+    onSelect([]);
+  };
+
   return (
     <div className={styles.container}>
-      <label htmlFor="preset-selector" className={styles.label}>
-        Preset
-      </label>
-      <select
-        id="preset-selector"
-        value={selectedPresetId}
-        onChange={handleChange}
-        className={styles.select}
-      >
-        <option value="">Select a preset...</option>
-        {PRESETS.map((preset) => (
-          <option key={preset.id} value={preset.id}>
-            {preset.name}
-          </option>
-        ))}
-      </select>
+      <div className={styles.selectRow}>
+        <select
+          id="preset-selector"
+          value={selectedPresetId}
+          onChange={handleChange}
+          className={styles.select}
+        >
+          <option value="">Select a preset...</option>
+          {PRESETS.map((preset) => (
+            <option key={preset.id} value={preset.id}>
+              {preset.name}
+            </option>
+          ))}
+        </select>
+        {selectedPresetId && (
+          <button
+            type="button"
+            className={styles.clearButton}
+            onClick={handleClear}
+            aria-label="Clear preset"
+          >
+            {'\u2715'}
+          </button>
+        )}
+      </div>
     </div>
   );
 }

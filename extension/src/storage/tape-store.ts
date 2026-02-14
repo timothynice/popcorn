@@ -145,6 +145,26 @@ export class TapeStore {
     });
   }
 
+  /** Alias for list() — retrieve all tapes. */
+  async getAll(): Promise<TapeRecord[]> {
+    return this.list();
+  }
+
+  /** Delete all tapes. */
+  async clear(): Promise<void> {
+    const db = this.requireDb();
+
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(this.storeName, 'readwrite');
+      const store = tx.objectStore(this.storeName);
+      const request = store.clear();
+
+      request.onsuccess = () => resolve();
+      request.onerror = () =>
+        reject(new Error(`Failed to clear tapes: ${request.error?.message}`));
+    });
+  }
+
   /** Return aggregate storage statistics. */
   async getStorageUsage(): Promise<{ count: number; totalSize: number }> {
     const tapes = await this.list();
@@ -199,6 +219,14 @@ export class MockTapeStore {
 
   async delete(id: string): Promise<void> {
     this.records.delete(id);
+  }
+
+  async getAll(): Promise<TapeRecord[]> {
+    return this.list();
+  }
+
+  async clear(): Promise<void> {
+    this.records.clear();
   }
 
   async getStorageUsage(): Promise<{ count: number; totalSize: number }> {

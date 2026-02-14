@@ -97,6 +97,37 @@
   font-weight: 500;
 }
 
+.testButton {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border: 1px solid var(--accent-blue);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--accent-blue);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.12s ease;
+  margin-left: 8px;
+}
+
+.testButton svg {
+  flex-shrink: 0;
+}
+
+.testButton:hover {
+  background: var(--accent-blue);
+  color: #fff;
+}
+
+.testButton:focus-visible {
+  outline: 2px solid var(--accent-blue);
+  outline-offset: 2px;
+}
+
 .gearButton {
   display: flex;
   align-items: center;
@@ -110,6 +141,7 @@
   cursor: pointer;
   transition: all 0.12s ease;
   padding: 0;
+  margin-left: 4px;
 }
 
 .gearButton:hover {

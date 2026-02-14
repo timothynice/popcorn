@@ -3,25 +3,14 @@ import { StatusBar } from './components/StatusBar';
 import { TapeList } from './components/TapeList';
 import { TapeDetail } from './components/TapeDetail';
 import { SettingsPanel } from './components/SettingsPanel';
+import { TestPanel } from './components/TestPanel';
 import { useExtensionState } from './hooks/useExtensionState';
 import { useTapes } from './hooks/useTapes';
 import type { TestPlan, StartDemoMessage } from '@popcorn/shared';
 import { createMessage } from '@popcorn/shared';
 import styles from './App.module.css';
 
-type View = 'feed' | 'detail' | 'settings';
-
-/** A minimal sample test plan used for quick demos from the popup. */
-function buildQuickTestPlan(): TestPlan {
-  return {
-    planName: 'quick-demo',
-    description: 'Quick demo from popup - captures a recording of the active tab',
-    steps: [
-      { stepNumber: 1, action: 'wait', description: 'Wait for page', condition: 'timeout', timeout: 500 },
-      { stepNumber: 2, action: 'screenshot', description: 'Capture screenshot' },
-    ],
-  };
-}
+type View = 'feed' | 'detail' | 'settings' | 'test';
 
 function App() {
   const { status, connected, error: extensionError, hookConnected } = useExtensionState();
@@ -77,19 +66,26 @@ function App() {
     }
   };
 
-  /** Run a manual demo with given criteria. */
-  const handleRunManualDemo = async (criteria: string[]) => {
-    const plan = buildQuickTestPlan();
+  /** Run a demo with a given test plan and criteria (from TestPanel). */
+  const handleRunTestDemo = async (plan: TestPlan, criteria: string[]) => {
     await sendStartDemo(plan, criteria);
   };
 
   const renderContent = () => {
+    if (currentView === 'test') {
+      return (
+        <TestPanel
+          onBack={handleBackToFeed}
+          onRunDemo={handleRunTestDemo}
+          demoRunning={demoRunning}
+        />
+      );
+    }
+
     if (currentView === 'settings') {
       return (
         <SettingsPanel
           onBack={handleBackToFeed}
-          onRunDemo={handleRunManualDemo}
-          demoRunning={demoRunning}
           connected={connected}
           status={status}
           hookConnected={hookConnected}
@@ -133,15 +129,18 @@ function App() {
     );
   };
 
+  const showStatusBar = currentView !== 'settings' && currentView !== 'test';
+
   return (
     <div className={styles.app}>
-      {currentView !== 'settings' && (
+      {showStatusBar && (
         <StatusBar
           status={status}
           connected={connected}
           error={extensionError}
           hookConnected={hookConnected}
           onSettingsClick={() => setCurrentView('settings')}
+          onTestClick={() => setCurrentView('test')}
           showBack={currentView === 'detail'}
           onBack={handleBackToFeed}
         />

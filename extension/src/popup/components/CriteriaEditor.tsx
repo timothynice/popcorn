@@ -27,7 +27,6 @@ export function CriteriaEditor({ criteria, onChange, readOnly = false }: Criteri
       <div className={styles.list}>
         {criteria.length === 0 && (
           <div className={styles.empty}>
-            <span className={styles.emptyIcon}>📝</span>
             <p className={styles.emptyMessage}>No criteria defined yet.</p>
             {!readOnly && (
               <p className={styles.emptyHint}>
@@ -47,7 +46,7 @@ export function CriteriaEditor({ criteria, onChange, readOnly = false }: Criteri
                 value={criterion}
                 onChange={(e) => handleCriterionChange(index, e.target.value)}
                 className={styles.criterionInput}
-                placeholder="Enter acceptance criterion..."
+                placeholder="e.g. Page loads without errors"
               />
             )}
             {!readOnly && (
@@ -55,7 +54,7 @@ export function CriteriaEditor({ criteria, onChange, readOnly = false }: Criteri
                 type="button"
                 onClick={() => handleRemoveCriterion(index)}
                 className={styles.removeButton}
-                aria-label="Remove criterion"
+                aria-label="Remove rule"
               >
                 ✕
               </button>
@@ -69,7 +68,7 @@ export function CriteriaEditor({ criteria, onChange, readOnly = false }: Criteri
           onClick={handleAddCriterion}
           className={styles.addButton}
         >
-          + Add criterion
+          + Add rule
         </button>
       )}
     </div>

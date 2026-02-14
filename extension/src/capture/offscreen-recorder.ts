@@ -15,6 +15,9 @@
  * vp9 offers better compression; vp8 is the widely-supported fallback.
  */
 const PREFERRED_MIME_TYPES = [
+  'video/mp4;codecs=avc1.424028,mp4a.40.2',
+  'video/mp4;codecs=avc1.424028',
+  'video/mp4',
   'video/webm;codecs=vp9',
   'video/webm;codecs=vp8',
   'video/webm',

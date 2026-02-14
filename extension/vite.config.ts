@@ -77,6 +77,7 @@ export default defineConfig({
       input: {
         background: resolve(__dirname, 'src/background/index.ts'),
         content: resolve(__dirname, 'src/content/index.ts'),
+        'page-scanner': resolve(__dirname, 'src/content/page-scanner.ts'),
         offscreen: resolve(__dirname, 'src/capture/offscreen-recorder.ts'),
         popup: resolve(__dirname, 'src/popup/index.html'),
       },
@@ -86,6 +87,7 @@ export default defineConfig({
           if (
             chunkInfo.name === 'background' ||
             chunkInfo.name === 'content' ||
+            chunkInfo.name === 'page-scanner' ||
             chunkInfo.name === 'offscreen'
           ) {
             return `${chunkInfo.name}.js`;

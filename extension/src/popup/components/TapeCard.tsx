@@ -72,7 +72,7 @@ export function TapeCard({ tape, onClick, isSelected, onRerun, variant = 'compac
               aria-label="Re-run with recording"
               title="Re-run with recording"
             >
-              {'\u25CF'}
+              {'\u25CF'}<span className={styles.recLabel}>REC</span>
             </button>
           )}
         </div>
@@ -143,7 +143,7 @@ export function TapeCard({ tape, onClick, isSelected, onRerun, variant = 'compac
           aria-label="Re-run with recording"
           title="Re-run with recording"
         >
-          {'\u25CF'}
+          {'\u25CF'}<span className={styles.recLabel}>REC</span>
         </button>
       )}
     </div>

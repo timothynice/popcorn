@@ -4,8 +4,9 @@ import type {
   StepResult,
   VideoMetadata,
   ScreenshotCapture,
+  CriterionResult,
 } from '@popcorn/shared';
-import { createMessage } from '@popcorn/shared';
+import { createMessage, parsePlainTextCriteria, evaluateAllCriteria } from '@popcorn/shared';
 import { createInitialState, transition } from './state.js';
 import type { OrchestratorState } from './state.js';
 
@@ -78,7 +79,7 @@ export async function handleStartDemo(
   }
 }
 
-function assembleDemoResult(
+export function assembleDemoResult(
   testPlanId: string,
   stepResults: StepResult[],
   startTime: number,
@@ -114,16 +115,27 @@ function assembleDemoResult(
     summary = `Demo completed with issues. ${passedSteps}/${totalSteps} steps passed, ${failedSteps} failed.`;
   }
 
+  // Evaluate acceptance criteria if provided
+  let criteriaResults: CriterionResult[] | undefined;
+  let criteriaPassed = true;
+  if (acceptanceCriteria.length > 0 && !error) {
+    const parsed = parsePlainTextCriteria(acceptanceCriteria.join('\n'));
+    const evaluation = evaluateAllCriteria(stepResults, parsed);
+    criteriaResults = evaluation.results;
+    criteriaPassed = evaluation.passed;
+  }
+
   // Placeholder for video metadata (actual video capture not implemented yet)
   const videoMetadata: VideoMetadata | null = null;
 
   return {
     testPlanId,
-    passed,
+    passed: passed && criteriaPassed,
     steps: stepResults,
     summary,
     videoMetadata,
     screenshots,
+    criteriaResults,
     duration,
     timestamp: Date.now(),
   };

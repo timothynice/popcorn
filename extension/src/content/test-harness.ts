@@ -30,7 +30,13 @@ export async function executeTestPlan(steps: TestStep[]): Promise<StepResult[]> 
 }
 
 // Listen for messages from background script
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  // Ping: background checks if content script is already loaded (avoid re-injection)
+  if (message.type === 'ping') {
+    sendResponse({ pong: true });
+    return false;
+  }
+
   if (message.type === 'execute_plan') {
     const steps: TestStep[] = message.payload.steps;
 

@@ -48,6 +48,15 @@ export {
   evaluateAllCriteria,
 } from './acceptance.js';
 
+export type { DetectedElement, BuildStepsMode } from './plan-builder.js';
+
+export {
+  buildSteps,
+  getPlaceholderValue,
+  resolveUrl,
+  PLACEHOLDER_VALUES,
+} from './plan-builder.js';
+
 export type { TapeRecord } from './tape.js';
 
 export { generateTapeName } from './tape-name.js';

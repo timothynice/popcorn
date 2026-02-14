@@ -31,7 +31,7 @@ describe('CriteriaEditor', () => {
 
     render(<CriteriaEditor criteria={criteria} onChange={onChange} />);
 
-    const addButton = screen.getByText('+ Add criterion');
+    const addButton = screen.getByText('+ Add rule');
     fireEvent.click(addButton);
 
     expect(onChange).toHaveBeenCalledWith(['Existing criterion', '']);
@@ -43,7 +43,7 @@ describe('CriteriaEditor', () => {
 
     render(<CriteriaEditor criteria={criteria} onChange={onChange} />);
 
-    const removeButtons = screen.getAllByLabelText('Remove criterion');
+    const removeButtons = screen.getAllByLabelText('Remove rule');
     fireEvent.click(removeButtons[1]);
 
     expect(onChange).toHaveBeenCalledWith(['Criterion 1', 'Criterion 3']);
@@ -67,8 +67,8 @@ describe('CriteriaEditor', () => {
 
     render(<CriteriaEditor criteria={criteria} onChange={onChange} readOnly />);
 
-    expect(screen.queryByLabelText('Remove criterion')).not.toBeInTheDocument();
-    expect(screen.queryByText('+ Add criterion')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Remove rule')).not.toBeInTheDocument();
+    expect(screen.queryByText('+ Add rule')).not.toBeInTheDocument();
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
 
     expect(screen.getByText('Criterion 1')).toBeInTheDocument();
@@ -92,7 +92,6 @@ describe('PresetSelector', () => {
 
     render(<PresetSelector onSelect={onSelect} />);
 
-    expect(screen.getByLabelText('Preset')).toBeInTheDocument();
     expect(screen.getByRole('combobox')).toBeInTheDocument();
   });
 
@@ -107,7 +106,6 @@ describe('PresetSelector', () => {
     expect(options).toContain('Forms');
     expect(options).toContain('Navigation');
     expect(options).toContain('Authentication');
-    expect(options).toContain('Custom');
   });
 
   it('calls onSelect with forms criteria when Forms preset is selected', () => {
@@ -160,14 +158,19 @@ describe('PresetSelector', () => {
     ]);
   });
 
-  it('calls onSelect with empty array when Custom preset is selected', () => {
+  it('shows clear button when preset is selected and clears on click', () => {
     const onSelect = vi.fn();
 
     render(<PresetSelector onSelect={onSelect} />);
 
+    // Select a preset first
     const select = screen.getByRole('combobox');
-    fireEvent.change(select, { target: { value: 'custom' } });
+    fireEvent.change(select, { target: { value: 'forms' } });
 
-    expect(onSelect).toHaveBeenCalledWith([]);
+    // Clear button should appear
+    const clearButton = screen.getByLabelText('Clear preset');
+    fireEvent.click(clearButton);
+
+    expect(onSelect).toHaveBeenLastCalledWith([]);
   });
 });

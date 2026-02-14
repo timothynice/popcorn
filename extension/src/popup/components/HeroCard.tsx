@@ -58,9 +58,11 @@ export function HeroCard({ tape, onClick }: HeroCardProps) {
             alt={`${tape.demoName} preview`}
             className={styles.thumbnail}
           />
-          <div className={styles.thumbnailOverlay}>
-            <span className={styles.playIcon}>{'\u25B6'}</span>
-          </div>
+          {tape.videoUrl && (
+            <div className={styles.thumbnailOverlay}>
+              <span className={styles.playIcon}>{'\u25B6'}</span>
+            </div>
+          )}
         </div>
       ) : tape.videoUrl ? (
         <div className={styles.thumbnailWrap}>

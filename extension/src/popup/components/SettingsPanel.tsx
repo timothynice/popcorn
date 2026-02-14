@@ -1,13 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import type { ExtensionStatus } from '../hooks/useExtensionState';
-import { CriteriaEditor } from './CriteriaEditor';
-import { PresetSelector } from './PresetSelector';
 import styles from './SettingsPanel.module.css';
 
 interface SettingsPanelProps {
   onBack: () => void;
-  onRunDemo: (criteria: string[]) => Promise<void>;
-  demoRunning: boolean;
   connected: boolean;
   status: ExtensionStatus;
   hookConnected: boolean;
@@ -15,19 +11,24 @@ interface SettingsPanelProps {
 
 export function SettingsPanel({
   onBack,
-  onRunDemo,
-  demoRunning,
   connected,
   status,
   hookConnected,
 }: SettingsPanelProps) {
-  const [criteria, setCriteria] = useState<string[]>([]);
+  const [tapeCount, setTapeCount] = useState<number | null>(null);
+  const [clearing, setClearing] = useState(false);
 
-  const handleRunDemo = async () => {
-    if (criteria.length > 0) {
-      await onRunDemo(criteria);
-    }
-  };
+  useEffect(() => {
+    chrome.runtime.sendMessage({ type: 'get_tape_count' })
+      .then((response) => {
+        if (response?.count !== undefined) {
+          setTapeCount(response.count);
+        }
+      })
+      .catch(() => {
+        // Background may not handle this yet
+      });
+  }, [clearing]);
 
   const getStatusLabel = () => {
     switch (status) {
@@ -35,6 +36,18 @@ export function SettingsPanel({
       case 'processing': return 'Processing';
       case 'error': return 'Error';
       default: return 'Idle';
+    }
+  };
+
+  const handleClearTapes = async () => {
+    setClearing(true);
+    try {
+      await chrome.runtime.sendMessage({ type: 'clear_tapes' });
+      setTapeCount(0);
+    } catch {
+      // ignore
+    } finally {
+      setClearing(false);
     }
   };
 
@@ -48,23 +61,7 @@ export function SettingsPanel({
       </div>
 
       <div className={styles.content}>
-        <section className={styles.section}>
-          <h3 className={styles.sectionTitle}>Manual Demo</h3>
-          <p className={styles.sectionHint}>
-            Run a demo on the current tab with custom criteria
-          </p>
-          <PresetSelector onSelect={setCriteria} />
-          <CriteriaEditor criteria={criteria} onChange={setCriteria} />
-          <button
-            type="button"
-            onClick={handleRunDemo}
-            disabled={criteria.length === 0 || demoRunning}
-            className={styles.runButton}
-          >
-            {demoRunning ? 'Running...' : 'Run Demo'}
-          </button>
-        </section>
-
+        {/* Status */}
         <section className={styles.section}>
           <h3 className={styles.sectionTitle}>Status</h3>
           <div className={styles.statusGrid}>
@@ -78,8 +75,26 @@ export function SettingsPanel({
             </span>
           </div>
           <p className={styles.statusHint}>
-            Demos run on the active tab. Make sure your app is open in Chrome before triggering a demo. You can set <code>baseUrl</code> in <code>popcorn.config.json</code> as a fallback.
+            Demos run on the active tab. Make sure your app is open in Chrome.
+            You can set <code>baseUrl</code> in <code>popcorn.config.json</code> as a fallback.
           </p>
+        </section>
+
+        {/* Storage */}
+        <section className={styles.section}>
+          <h3 className={styles.sectionTitle}>Storage</h3>
+          <div className={styles.storageRow}>
+            <span className={styles.storageLabel}>
+              {tapeCount !== null ? `${tapeCount} tape${tapeCount !== 1 ? 's' : ''} saved` : 'Loading...'}
+            </span>
+            <button
+              className={styles.clearButton}
+              onClick={handleClearTapes}
+              disabled={clearing || tapeCount === 0}
+            >
+              {clearing ? 'Clearing...' : 'Clear All Tapes'}
+            </button>
+          </div>
         </section>
       </div>
     </div>

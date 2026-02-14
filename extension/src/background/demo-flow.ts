@@ -8,12 +8,13 @@ import type {
   StartDemoMessage,
   DemoResult,
   VideoMetadata,
+  StepResult,
   TestStep,
 } from '@popcorn/shared';
 import { generateTapeName } from '@popcorn/shared';
 import { Recorder } from '../capture/recorder.js';
 import { captureScreenshot } from '../capture/screenshot.js';
-import { handleStartDemo } from './demo-orchestrator.js';
+import { assembleDemoResult } from './demo-orchestrator.js';
 import type { TapeStore, TapeRecord } from '../storage/tape-store.js';
 
 export interface DemoFlowDeps {
@@ -26,9 +27,21 @@ export interface DemoFlowDeps {
 }
 
 /**
+ * A round groups consecutive background-handled steps (navigate/wait)
+ * followed by consecutive content-script-safe steps (click/fill/screenshot/etc).
+ * The background executes each round in order: first its backgroundSteps,
+ * then it injects the content script and sends the contentSteps batch.
+ */
+interface StepRound {
+  backgroundSteps: TestStep[];
+  contentSteps: TestStep[];
+}
+
+/**
  * Runs the full demo pipeline:
  * 1. Optionally starts tab recording (graceful degradation if unavailable).
- * 2. Executes the test plan via the content script through the orchestrator.
+ * 2. Groups test plan steps into rounds, executing navigate/wait from the
+ *    background and click/fill/screenshot/etc via the content script.
  * 3. Stops recording and collects video metadata.
  * 4. Saves a TapeRecord to the TapeStore.
  * 5. Returns the assembled DemoResult.
@@ -43,7 +56,7 @@ export async function runFullDemo(
   tabId: number,
   deps: DemoFlowDeps,
 ): Promise<DemoResult> {
-  const { testPlan, testPlanId } = message.payload;
+  const { testPlan, testPlanId, acceptanceCriteria } = message.payload;
   const recorder = new Recorder();
   let recordingAvailable = false;
 
@@ -65,53 +78,108 @@ export async function runFullDemo(
     console.log('[Popcorn] Recording skipped (no user gesture available)');
   }
 
-  // 2. Handle navigate steps from the background (content script can't
-  //    survive page navigation — setting window.location destroys its context).
-  //    We split off leading navigate/wait steps and handle them here, then
-  //    pass the remaining steps to the content script via the orchestrator.
-  const { navigateSteps, contentSteps } = splitNavigateSteps(testPlan.steps);
+  // 2. Group steps into rounds. Each round has background steps (navigate/wait)
+  //    followed by content script steps (click/fill/screenshot/assert/etc).
+  //    This handles both simple plans (one round) and exhaustive plans
+  //    (many rounds with navigate-back between each click).
+  const rounds = groupStepRounds(testPlan.steps);
+  const allStepResults: StepResult[] = [];
+  const startTime = Date.now();
 
-  for (const step of navigateSteps) {
-    if (step.action === 'navigate' && step.target) {
-      console.log(`[Popcorn] Background navigating to: ${step.target}`);
-      await navigateTab(tabId, step.target);
-    } else if (step.action === 'wait') {
-      const waitMs = step.timeout || 1000;
-      console.log(`[Popcorn] Background waiting ${waitMs}ms`);
-      await new Promise((resolve) => setTimeout(resolve, waitMs));
+  try {
+    for (const round of rounds) {
+      // 2a. Execute background steps (navigate/wait) and record results
+      for (const step of round.backgroundSteps) {
+        const stepStart = Date.now();
+        if (step.action === 'navigate' && step.target) {
+          console.log(`[Popcorn] Background navigating to: ${step.target}`);
+          await navigateTab(tabId, step.target);
+        } else if (step.action === 'wait') {
+          const waitMs = step.timeout || 1000;
+          console.log(`[Popcorn] Background waiting ${waitMs}ms`);
+          await new Promise((resolve) => setTimeout(resolve, waitMs));
+        }
+        allStepResults.push({
+          stepNumber: step.stepNumber,
+          description: step.description || step.action,
+          action: step.action,
+          passed: true,
+          timestamp: stepStart,
+          duration: Date.now() - stepStart,
+        });
+      }
+
+      // Skip content script call if this round has no content steps
+      if (round.contentSteps.length === 0) continue;
+
+      console.log(
+        `[Popcorn] Executing content round: ${round.contentSteps.length} steps`,
+        round.contentSteps.map((s) => `${s.stepNumber}:${s.action}`).join(', '),
+      );
+
+      // 2b. Inject content script if not already loaded.
+      // Re-injecting content.js into the same page causes "Identifier already declared"
+      // because bundled const/let at module scope can't be redeclared.
+      // Ping first — if the content script responds, skip injection.
+      let needsInjection = true;
+      try {
+        const ping = await chrome.tabs.sendMessage(tabId, { type: 'ping' });
+        if (ping) needsInjection = false;
+      } catch {
+        // No content script listening — needs injection
+      }
+
+      if (needsInjection) {
+        try {
+          await chrome.scripting.executeScript({
+            target: { tabId },
+            files: ['content.js'],
+          });
+        } catch (err) {
+          console.warn(
+            '[Popcorn] Content script injection failed:',
+            err instanceof Error ? err.message : String(err),
+          );
+        }
+      }
+
+      // 2c. Send this round's content steps to the content script
+      const response = await chrome.tabs.sendMessage(tabId, {
+        type: 'execute_plan',
+        payload: { steps: round.contentSteps },
+      });
+
+      if (response?.results) {
+        const roundResults = response.results as StepResult[];
+
+        // 2d. Capture screenshots for this round IMMEDIATELY (before navigating away)
+        for (const stepResult of roundResults) {
+          if (stepResult.metadata?.needsBackgroundScreenshot) {
+            try {
+              const dataUrl = await captureScreenshot(tabId);
+              stepResult.screenshotDataUrl = dataUrl;
+              if (stepResult.metadata) {
+                stepResult.metadata.screenshotDataUrl = dataUrl;
+                delete stepResult.metadata.needsBackgroundScreenshot;
+              }
+            } catch (err) {
+              const errMsg = err instanceof Error ? err.message : String(err);
+              console.warn(
+                `[Popcorn] Per-round screenshot for step ${stepResult.stepNumber} failed:`,
+                errMsg,
+              );
+              stepResult.passed = false;
+              stepResult.error = `Screenshot capture failed: ${errMsg}`;
+              if (stepResult.metadata) {
+                delete stepResult.metadata.needsBackgroundScreenshot;
+              }
+            }
+          }
+        }
+
+        allStepResults.push(...roundResults);
+      }
     }
-  }
-
-  // 3. Ensure content script is injected (handles extension reload case
-  //    and post-navigation re-injection)
-  try {
-    await chrome.scripting.executeScript({
-      target: { tabId },
-      files: ['content.js'],
-    });
-  } catch (err) {
-    console.warn(
-      '[Popcorn] Content script injection failed:',
-      err instanceof Error ? err.message : String(err),
-    );
-  }
-
-  // 4. Execute the remaining steps via the content script through the orchestrator.
-  //    We create a modified message with only the content-script-safe steps.
-  const contentMessage: StartDemoMessage = {
-    ...message,
-    payload: {
-      ...message.payload,
-      testPlan: {
-        ...testPlan,
-        steps: contentSteps,
-      },
-    },
-  };
-
-  let demoResult: DemoResult;
-  try {
-    demoResult = await handleStartDemo(contentMessage, tabId);
   } catch (err) {
     // If execution fails, still try to stop the recorder
     if (recordingAvailable) {
@@ -122,16 +190,32 @@ export async function runFullDemo(
       }
       recorder.reset();
     }
-    throw err;
+    // Assemble an error result from whatever we collected
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    const errorResult = assembleDemoResult(
+      testPlanId,
+      allStepResults,
+      startTime,
+      acceptanceCriteria ?? [],
+      errorMessage,
+    );
+    // Still save the tape and return
+    await saveTapeAndReload(errorResult, null, null, null, testPlan, testPlanId, tabId, deps);
+    return errorResult;
   }
 
-  // 4a. Capture screenshots from the background for any steps that requested it.
+  // 3. Assemble demo result from all collected step results
+  const demoResult = assembleDemoResult(
+    testPlanId,
+    allStepResults,
+    startTime,
+    acceptanceCriteria ?? [],
+  );
+
+  // 3a. Capture screenshots from the background for any steps that requested it.
   //     The content script returns a marker (needsBackgroundScreenshot) instead of
   //     attempting nested messaging, which avoids Chrome message channel issues.
-  //     We also update demoResult.screenshots since assembleDemoResult already ran.
 
-  // Ensure the tab is focused so captureVisibleTab works — during hook-triggered
-  // demos the tab may not be active (popup or devtools could be in front).
   const hasScreenshotSteps = demoResult.steps.some(
     (s) => s.metadata?.needsBackgroundScreenshot,
   );
@@ -142,7 +226,6 @@ export async function runFullDemo(
         await chrome.windows.update(tab.windowId, { focused: true });
       }
       await chrome.tabs.update(tabId, { active: true });
-      // Brief delay for the browser to render the focused tab
       await new Promise((resolve) => setTimeout(resolve, 250));
     } catch {
       // Best-effort focus
@@ -158,7 +241,6 @@ export async function runFullDemo(
           stepResult.metadata.screenshotDataUrl = dataUrl;
           delete stepResult.metadata.needsBackgroundScreenshot;
         }
-        // Push into the already-assembled screenshots array
         demoResult.screenshots.push({
           stepNumber: stepResult.stepNumber,
           dataUrl,
@@ -171,7 +253,6 @@ export async function runFullDemo(
           `[Popcorn] Background screenshot for step ${stepResult.stepNumber} failed:`,
           errMsg,
         );
-        // Mark the step as failed so the UI accurately reflects the capture failure
         stepResult.passed = false;
         stepResult.error = `Screenshot capture failed: ${errMsg}`;
         if (stepResult.metadata) {
@@ -181,7 +262,7 @@ export async function runFullDemo(
     }
   }
 
-  // 5. Stop recording and collect video metadata
+  // 4. Stop recording and collect video metadata
   let videoMetadata: VideoMetadata | null = null;
   let videoBlob: Blob | null = null;
 
@@ -189,9 +270,13 @@ export async function runFullDemo(
     try {
       const { blob, metadata } = await recorder.stop();
       metadata.filename = `demo-${testPlanId}-${Date.now()}.webm`;
-      videoMetadata = metadata;
-      videoBlob = blob;
-      console.log(`[Popcorn] Recording stopped, ${blob.size} bytes captured`);
+      if (blob.size > 0) {
+        videoMetadata = metadata;
+        videoBlob = blob;
+        console.log(`[Popcorn] Recording stopped, ${blob.size} bytes captured`);
+      } else {
+        console.warn('[Popcorn] Recording captured 0 bytes, discarding empty video');
+      }
     } catch (err) {
       console.warn(
         '[Popcorn] Failed to stop recording:',
@@ -207,40 +292,61 @@ export async function runFullDemo(
     videoMetadata: videoMetadata ?? demoResult.videoMetadata,
   };
 
-  // 6. Capture a final screenshot for the tape thumbnail
-  //    Ensure the tab is focused first — captureVisibleTab needs the tab visible.
-  let thumbnailDataUrl: string | null = null;
-  try {
-    const tab = await chrome.tabs.get(tabId);
-    if (tab.windowId) {
-      await chrome.windows.update(tab.windowId, { focused: true });
+  // 5. Save tape, capture thumbnail, reload tab
+  await saveTapeAndReload(resultWithVideo, videoBlob, videoMetadata, null, testPlan, testPlanId, tabId, deps);
+
+  return resultWithVideo;
+}
+
+/**
+ * Saves a TapeRecord to the store, captures a thumbnail, and reloads the tab.
+ * Extracted to avoid duplicating this logic in the success and error paths.
+ */
+async function saveTapeAndReload(
+  result: DemoResult,
+  videoBlob: Blob | null,
+  videoMetadata: VideoMetadata | null,
+  _thumbnailOverride: string | null,
+  testPlan: StartDemoMessage['payload']['testPlan'],
+  testPlanId: string,
+  tabId: number,
+  deps: DemoFlowDeps,
+): Promise<void> {
+  // Capture a final screenshot for the tape thumbnail
+  let thumbnailDataUrl: string | null = _thumbnailOverride;
+  if (!thumbnailDataUrl) {
+    try {
+      const tab = await chrome.tabs.get(tabId);
+      if (tab.windowId) {
+        await chrome.windows.update(tab.windowId, { focused: true });
+      }
+      await chrome.tabs.update(tabId, { active: true });
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    } catch {
+      // Best-effort focus for thumbnail
     }
-    await chrome.tabs.update(tabId, { active: true });
-    await new Promise((resolve) => setTimeout(resolve, 250));
-  } catch {
-    // Best-effort focus for thumbnail
-  }
-  try {
-    thumbnailDataUrl = await captureScreenshot(tabId);
-  } catch {
-    // Thumbnail is optional
+    try {
+      thumbnailDataUrl = await captureScreenshot(tabId);
+    } catch {
+      // Thumbnail is optional
+    }
   }
 
-  // 7. Save tape record
+  // Save tape record
   try {
     const tapeData: Omit<TapeRecord, 'id'> = {
       demoName: generateTapeName(testPlan),
       testPlanId,
       timestamp: Date.now(),
-      duration: resultWithVideo.duration,
+      duration: result.duration,
       fileSize: videoBlob?.size ?? 0,
       resolution: videoMetadata?.resolution ?? { width: 0, height: 0 },
-      status: resultWithVideo.passed ? 'complete' : 'error',
-      passed: resultWithVideo.passed,
-      summary: resultWithVideo.summary,
+      status: result.passed ? 'complete' : 'error',
+      passed: result.passed,
+      summary: result.summary,
       videoBlob,
       thumbnailDataUrl,
-      results: resultWithVideo,
+      results: result,
       testPlan,
     };
 
@@ -254,7 +360,7 @@ export async function runFullDemo(
     );
   }
 
-  // 8. Reset app state by reloading the tab so the next demo starts fresh.
+  // Reset app state by reloading the tab so the next demo starts fresh.
   try {
     await reloadTab(tabId);
     console.log('[Popcorn] Tab reloaded to reset app state');
@@ -264,40 +370,44 @@ export async function runFullDemo(
       err instanceof Error ? err.message : String(err),
     );
   }
-
-  return resultWithVideo;
 }
 
 /**
- * Splits test plan steps into background-handled navigate/wait steps
- * and content-script-safe steps. Navigate steps that use window.location
- * destroy the content script context, so we handle them from the background
- * using chrome.tabs.update instead.
+ * Groups test plan steps into execution rounds. Each round contains:
+ * - backgroundSteps: navigate/wait steps handled by the background via
+ *   chrome.tabs.update (safe — doesn't destroy content script context).
+ * - contentSteps: click/fill/screenshot/assert/etc steps sent to the
+ *   content script as a batch.
  *
- * Splits at the boundary: all leading navigate/wait steps go to the
- * background; everything from the first non-navigate/non-wait step
- * onward goes to the content script.
+ * This handles both simple plans (single round: navigate → content steps)
+ * and exhaustive plans (multiple rounds: navigate → click → screenshot →
+ * navigate-back → wait → click → screenshot → navigate-back → ...).
  */
-function splitNavigateSteps(steps: TestStep[]): {
-  navigateSteps: TestStep[];
-  contentSteps: TestStep[];
-} {
-  const navigateSteps: TestStep[] = [];
-  let splitIndex = 0;
+export function groupStepRounds(steps: TestStep[]): StepRound[] {
+  const rounds: StepRound[] = [];
+  let bgSteps: TestStep[] = [];
+  let csSteps: TestStep[] = [];
 
   for (const step of steps) {
     if (step.action === 'navigate' || step.action === 'wait') {
-      navigateSteps.push(step);
-      splitIndex++;
+      // If we have accumulated content steps, close the current round
+      if (csSteps.length > 0) {
+        rounds.push({ backgroundSteps: bgSteps, contentSteps: csSteps });
+        bgSteps = [];
+        csSteps = [];
+      }
+      bgSteps.push(step);
     } else {
-      break;
+      csSteps.push(step);
     }
   }
 
-  return {
-    navigateSteps,
-    contentSteps: steps.slice(splitIndex),
-  };
+  // Push final round
+  if (bgSteps.length > 0 || csSteps.length > 0) {
+    rounds.push({ backgroundSteps: bgSteps, contentSteps: csSteps });
+  }
+
+  return rounds;
 }
 
 /**

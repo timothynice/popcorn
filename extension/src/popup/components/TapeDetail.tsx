@@ -111,7 +111,7 @@ export function TapeDetail({ tape }: TapeDetailProps) {
               <a
                 className={styles.downloadBtn}
                 href={tape.videoUrl}
-                download={`${tape.demoName}.webm`}
+                download={`${tape.demoName}.${tape.videoMetadata?.mimeType?.startsWith('video/mp4') ? 'mp4' : 'webm'}`}
                 onClick={(e) => e.stopPropagation()}
                 title="Download video"
               >
@@ -196,7 +196,32 @@ export function TapeDetail({ tape }: TapeDetailProps) {
           </div>
         </section>
 
-        {/* 7. Screenshots grid (if multiple — hero already shows primary image) */}
+        {/* 7. Criteria results */}
+        {tape.criteriaResults && tape.criteriaResults.length > 0 && (
+          <section className={styles.section}>
+            <h3 className={styles.sectionTitle}>Criteria</h3>
+            <div className={styles.criteria}>
+              {tape.criteriaResults.map((cr, index) => (
+                <div
+                  key={cr.criterionId || index}
+                  className={`${styles.criterion} ${cr.passed ? styles.criterionPassed : styles.criterionFailed}`}
+                >
+                  <span className={styles.criterionIcon}>
+                    {cr.passed ? '\u2713' : '\u2717'}
+                  </span>
+                  <div className={styles.criterionBody}>
+                    <span className={styles.criterionMessage}>{cr.message}</span>
+                    {cr.evidence && (
+                      <span className={styles.criterionEvidence}>{cr.evidence}</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* 8. Screenshots grid (if multiple — hero already shows primary image) */}
         {tape.screenshots.length > 1 && (
           <section className={styles.section}>
             <h3 className={styles.sectionTitle}>Screenshots</h3>
