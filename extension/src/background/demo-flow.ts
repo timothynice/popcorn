@@ -777,7 +777,9 @@ export async function runExplorationDemo(
     tags: ['exploration', plan.mode],
   };
 
-  await saveTapeAndReload(demoResult, null, null, null, testPlanForTape, testPlanForTape.planName, tabId, deps);
+  // Use the first screenshot as thumbnail instead of capturing a new one
+  const firstScreenshot = screenshots.length > 0 ? screenshots[0].dataUrl : null;
+  await saveTapeAndReload(demoResult, null, null, firstScreenshot, testPlanForTape, testPlanForTape.planName, tabId, deps);
 
   return demoResult;
 }
