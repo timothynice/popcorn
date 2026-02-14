@@ -180,6 +180,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           .then((plan) => sendResponse({ success: true, plan }))
           .catch((err) => sendResponse({ success: false, error: err instanceof Error ? err.message : String(err) }));
         return true;
+      case 'step_progress':
+        // Relay progress from content script to popup
+        chrome.runtime.sendMessage({
+          type: 'step_progress',
+          payload: message.payload,
+        }).catch(() => {});
+        return false;
       default:
         return false;
     }

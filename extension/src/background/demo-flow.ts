@@ -87,11 +87,23 @@ export async function runFullDemo(
   const rounds = groupStepRounds(testPlan.steps);
   const allStepResults: StepResult[] = [];
   const startTime = Date.now();
+  const totalStepCount = testPlan.steps.length;
 
   try {
     for (const round of rounds) {
       // 2a. Execute background steps (navigate/go_back) and record results
       for (const step of round.backgroundSteps) {
+        // Broadcast progress before executing background step
+        chrome.runtime.sendMessage({
+          type: 'step_progress',
+          payload: {
+            stepNumber: step.stepNumber,
+            totalSteps: totalStepCount,
+            description: step.description,
+            passed: true,
+          },
+        }).catch(() => {});
+
         const stepStart = Date.now();
         if (step.action === 'navigate' && step.target) {
           console.log(`[Popcorn] Background navigating to: ${step.target}`);

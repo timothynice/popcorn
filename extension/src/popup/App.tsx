@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { StatusBar } from './components/StatusBar';
 import { TestButtonArea } from './components/TestButtonArea';
 import { TapeList } from './components/TapeList';
@@ -6,19 +6,23 @@ import { TapeDetail } from './components/TapeDetail';
 import { SettingsPanel } from './components/SettingsPanel';
 import { TestPanel } from './components/TestPanel';
 import { PlansPanel } from './components/PlansPanel';
+import { DemoProgress } from './components/DemoProgress';
 import { useExtensionState } from './hooks/useExtensionState';
 import { useTapes } from './hooks/useTapes';
 import type { TestPlan, StartDemoMessage, ExplorationPlan } from '@popcorn/shared';
 import { createMessage } from '@popcorn/shared';
 import styles from './App.module.css';
 
-type View = 'feed' | 'detail' | 'settings' | 'test';
+type View = 'feed' | 'detail' | 'settings' | 'test' | 'plans';
 
 function App() {
   const { status, connected, error: extensionError, hookConnected } = useExtensionState();
   const { tapes, isLoading, error: tapesError, selectedTapeId, selectTape, refresh: refreshTapes } = useTapes();
   const [currentView, setCurrentView] = useState<View>('feed');
   const [demoRunning, setDemoRunning] = useState(false);
+  const [progressStep, setProgressStep] = useState(0);
+  const [progressTotal, setProgressTotal] = useState(0);
+  const [progressDescription, setProgressDescription] = useState('');
 
   const selectedTape = selectedTapeId
     ? tapes.find((tape) => tape.id === selectedTapeId)
@@ -26,6 +30,28 @@ function App() {
 
   // Sort tapes by timestamp descending (most recent first)
   const sortedTapes = [...tapes].sort((a, b) => b.timestamp - a.timestamp);
+
+  // Listen for step_progress messages from background
+  useEffect(() => {
+    const listener = (message: Record<string, unknown>) => {
+      if (message?.type === 'step_progress' && message.payload) {
+        const p = message.payload as { stepNumber: number; totalSteps: number; description: string };
+        setProgressStep(p.stepNumber);
+        setProgressTotal(p.totalSteps);
+        setProgressDescription(p.description);
+      }
+      if (message?.type === 'status_update') {
+        const p = message.payload as { status: string };
+        if (p.status === 'idle' || p.status === 'complete' || p.status === 'error') {
+          setProgressStep(0);
+          setProgressTotal(0);
+          setProgressDescription('');
+        }
+      }
+    };
+    chrome.runtime.onMessage.addListener(listener);
+    return () => chrome.runtime.onMessage.removeListener(listener);
+  }, []);
 
   const handleTapeClick = (tapeId: string) => {
     selectTape(tapeId);
@@ -50,7 +76,7 @@ function App() {
       });
       // Fire-and-forget: don't await — background runs the demo async
       // and sendMessage won't resolve until the entire demo finishes
-      chrome.runtime.sendMessage(message);
+      chrome.runtime.sendMessage(message).catch(() => {});
       // Close popup immediately so it doesn't overlay screenshots
       window.close();
     } catch (err) {
@@ -70,9 +96,9 @@ function App() {
     }
   };
 
-  /** Run a demo with a given test plan and criteria (from TestPanel). */
-  const handleRunTestDemo = async (plan: TestPlan | ExplorationPlan, criteria: string[]) => {
-    await sendStartDemo(plan, criteria);
+  /** Run a plan from the PlansPanel (no criteria). */
+  const handleRunPlanFromList = (plan: TestPlan) => {
+    sendStartDemo(plan, []);
   };
 
   const renderContent = () => {
@@ -80,7 +106,7 @@ function App() {
       return (
         <TestPanel
           onBack={handleBackToFeed}
-          onRunDemo={handleRunTestDemo}
+          onRunDemo={sendStartDemo}
           demoRunning={demoRunning}
         />
       );
@@ -93,6 +119,16 @@ function App() {
           connected={connected}
           status={status}
           hookConnected={hookConnected}
+        />
+      );
+    }
+
+    if (currentView === 'plans') {
+      return (
+        <PlansPanel
+          onBack={handleBackToFeed}
+          hookConnected={hookConnected}
+          onRunPlan={handleRunPlanFromList}
         />
       );
     }
@@ -110,6 +146,13 @@ function App() {
     return (
       <div className={styles.feed}>
         <TestButtonArea onClick={() => setCurrentView('test')} />
+        {status === 'recording' && progressTotal > 0 && (
+          <DemoProgress
+            currentStep={progressStep}
+            totalSteps={progressTotal}
+            stepDescription={progressDescription}
+          />
+        )}
         {showNoPageWarning && (
           <div className={styles.warningBanner}>
             <span className={styles.warningIcon}>!</span>
@@ -134,7 +177,7 @@ function App() {
     );
   };
 
-  const showStatusBar = currentView !== 'settings' && currentView !== 'test';
+  const showStatusBar = currentView !== 'settings' && currentView !== 'test' && currentView !== 'plans';
 
   return (
     <div className={styles.app}>
@@ -145,6 +188,7 @@ function App() {
           error={extensionError}
           hookConnected={hookConnected}
           onSettingsClick={() => setCurrentView('settings')}
+          onPlansClick={() => setCurrentView('plans')}
           showBack={currentView === 'detail'}
           onBack={handleBackToFeed}
         />

@@ -128,7 +128,7 @@
   outline-offset: 2px;
 }
 
-.gearButton {
+.iconButton {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -144,12 +144,12 @@
   margin-left: 4px;
 }
 
-.gearButton:hover {
+.iconButton:hover {
   background: var(--bg-card);
   color: var(--text-primary);
 }
 
-.gearButton:focus-visible {
+.iconButton:focus-visible {
   outline: 2px solid var(--accent-blue);
   outline-offset: -2px;
 }

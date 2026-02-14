@@ -13,6 +13,17 @@ export async function executeTestPlan(steps: TestStep[]): Promise<StepResult[]> 
       const stepStartTime = Date.now();
       const result = await executeAction(step);
 
+      // Broadcast progress to background (which relays to popup)
+      chrome.runtime.sendMessage({
+        type: 'step_progress',
+        payload: {
+          stepNumber: step.stepNumber,
+          totalSteps: steps.length,
+          description: step.description,
+          passed: result.passed,
+        },
+      }).catch(() => {});
+
       // Attach console logs captured during this step
       result.consoleLogs = consoleCapture.getLogsSince(stepStartTime);
 
