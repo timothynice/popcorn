@@ -158,6 +158,10 @@ export class BridgeServer {
       this.handleGetConfig(req, res);
     } else if (url === '/config' && req.method === 'POST') {
       this.handleSetConfig(req, res);
+    } else if (url === '/plans' && req.method === 'GET') {
+      this.handleGetPlans(req, res);
+    } else if (url.startsWith('/plans/') && req.method === 'GET') {
+      this.handleGetPlan(req, res, url);
     } else {
       this.json(res, 404, { ok: false, error: 'Not found' });
     }

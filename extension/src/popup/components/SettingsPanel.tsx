@@ -35,6 +35,28 @@ export function SettingsPanel({
       });
   }, [clearing]);
 
+  useEffect(() => {
+    if (hookConnected) {
+      setLoadingConfig(true);
+      setConfigError(null);
+      chrome.runtime.sendMessage({ type: 'get_config' })
+        .then((response) => {
+          if (response?.success && response.config) {
+            setConfig(response.config);
+            setBaseUrlValue(response.config.baseUrl || '');
+          } else {
+            setConfigError(response?.error || 'Failed to load config');
+          }
+        })
+        .catch((err) => {
+          setConfigError(err instanceof Error ? err.message : String(err));
+        })
+        .finally(() => {
+          setLoadingConfig(false);
+        });
+    }
+  }, [hookConnected]);
+
   const getStatusLabel = () => {
     switch (status) {
       case 'recording': return 'Recording';
@@ -54,6 +76,29 @@ export function SettingsPanel({
     } finally {
       setClearing(false);
     }
+  };
+
+  const handleSaveBaseUrl = async () => {
+    if (!config) return;
+
+    const updatedConfig = { ...config, baseUrl: baseUrlValue };
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: 'set_config',
+        payload: { config: updatedConfig },
+      });
+      if (response?.success) {
+        setConfig(updatedConfig);
+        setEditingBaseUrl(false);
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleCancelBaseUrl = () => {
+    setBaseUrlValue(config?.baseUrl || '');
+    setEditingBaseUrl(false);
   };
 
   return (
@@ -84,6 +129,61 @@ export function SettingsPanel({
             You can set <code>baseUrl</code> in <code>popcorn.config.json</code> as a fallback.
           </p>
         </section>
+
+        {/* Configuration */}
+        {hookConnected && (
+          <section className={styles.section}>
+            <h3 className={styles.sectionTitle}>Configuration</h3>
+            {loadingConfig && (
+              <p className={styles.configLoading}>Loading configuration...</p>
+            )}
+            {configError && (
+              <p className={styles.configError}>{configError}</p>
+            )}
+            {config && !loadingConfig && (
+              <div className={styles.configGrid}>
+                <span className={styles.configLabel}>Watch Directory:</span>
+                <code className={styles.configValue}>{config.watchDir || 'N/A'}</code>
+
+                <span className={styles.configLabel}>Bridge Port:</span>
+                <code className={styles.configValue}>{config.bridgePort || '7890'}</code>
+
+                <span className={styles.configLabel}>Base URL:</span>
+                <div className={styles.editableField}>
+                  {editingBaseUrl ? (
+                    <>
+                      <input
+                        type="text"
+                        className={styles.configInput}
+                        value={baseUrlValue}
+                        onChange={(e) => setBaseUrlValue(e.target.value)}
+                        placeholder="http://localhost:3000"
+                      />
+                      <div className={styles.editActions}>
+                        <button className={styles.saveButton} onClick={handleSaveBaseUrl}>
+                          Save
+                        </button>
+                        <button className={styles.cancelButton} onClick={handleCancelBaseUrl}>
+                          Cancel
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <code className={styles.configValue}>{config.baseUrl || '(not set)'}</code>
+                      <button
+                        className={styles.editButton}
+                        onClick={() => setEditingBaseUrl(true)}
+                      >
+                        Edit
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
+          </section>
+        )}
 
         {/* Storage */}
         <section className={styles.section}>

@@ -132,3 +132,115 @@
   opacity: 0.4;
   cursor: not-allowed;
 }
+
+/* ---- Configuration ---- */
+
+.configLoading,
+.configError {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  margin: 0;
+}
+
+.configLoading {
+  color: var(--text-secondary);
+}
+
+.configError {
+  color: var(--accent-red);
+}
+
+.configGrid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px 12px;
+  align-items: center;
+}
+
+.configLabel {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.configValue {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-primary);
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
+  padding: 4px 6px;
+}
+
+.editableField {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.configInput {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  padding: 4px 6px;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.configInput:focus {
+  border-color: var(--accent-blue);
+}
+
+.editActions {
+  display: flex;
+  gap: 4px;
+}
+
+.editButton,
+.saveButton,
+.cancelButton {
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  outline: none;
+}
+
+.editButton {
+  background: none;
+  border: 1px solid var(--border-color);
+  color: var(--accent-blue);
+}
+
+.editButton:hover {
+  background: var(--bg-secondary);
+  border-color: var(--accent-blue);
+}
+
+.saveButton {
+  background: var(--accent-blue);
+  border: 1px solid var(--accent-blue);
+  color: white;
+}
+
+.saveButton:hover {
+  opacity: 0.9;
+}
+
+.cancelButton {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+}
+
+.cancelButton:hover {
+  background: var(--bg-secondary);
+}
