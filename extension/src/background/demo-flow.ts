@@ -810,7 +810,13 @@ async function exploreElement(
   step++;
 
   if (!actionabilityResult.passed || actionabilityResult.metadata?.actionable === false) {
-    console.log(`[Popcorn] Skipping "${target.label}": ${actionabilityResult.metadata?.reason || 'not actionable'}`);
+    const reason = actionabilityResult.metadata?.reason || 'not actionable';
+    console.log(`[Popcorn] Skipping "${target.label}": ${reason}`);
+    // Replace the failed check_actionability result with a descriptive skip
+    results[results.length - 1] = makeStepResult(
+      actionabilityResult.stepNumber, 'check_actionability',
+      `Skipped ${target.label} (${reason})`, true,
+    );
     return { results, screenshots: screenshotCaptures };
   }
 
@@ -891,8 +897,12 @@ async function exploreElement(
       // Check if we landed on an extension or chrome:// page (e.g. PDF viewer)
       const currentTab = await chrome.tabs.get(tabId);
       const currentUrl = currentTab.url || '';
-      if (currentUrl.startsWith('chrome-extension://') || currentUrl.startsWith('chrome://')) {
-        // Can't inject content scripts into extension/chrome pages — navigate directly
+      const isUnscriptable = currentUrl.startsWith('chrome-extension://') ||
+        currentUrl.startsWith('chrome://') ||
+        currentUrl.startsWith('blob:') ||
+        currentUrl.startsWith('about:');
+      if (isUnscriptable) {
+        // Can't inject content scripts into these pages — navigate directly
         await navigateTab(tabId, urlBefore);
         results.push(makeStepResult(step++, 'navigate', 'Return from extension page', true));
         await ensureContentScript(tabId);
@@ -931,13 +941,14 @@ async function exploreElement(
         step++;
       }
     } catch (err) {
-      console.warn('[Popcorn] Recovery after navigation failed:', err);
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.warn('[Popcorn] Recovery after navigation failed:', errMsg);
       // Try hard fallback: navigate directly to original URL
       try {
         await navigateTab(tabId, urlBefore);
-        results.push(makeStepResult(step++, 'navigate', 'Hard fallback to original page', true));
+        results.push(makeStepResult(step++, 'navigate', `Return to page (${errMsg})`, true));
       } catch {
-        // Nothing more we can do
+        results.push(makeStepResult(step++, 'navigate', `Failed to return to page: ${errMsg}`, false));
       }
     }
   }
