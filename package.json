@@ -2,6 +2,23 @@
   "name": "popcorn",
   "version": "0.1.0",
   "private": true,
+  "description": "Autonomous visual testing for AI-generated frontend code",
+  "license": "MIT",
+  "author": "Tim Nice",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/timothynice/popcorn.git"
+  },
+  "keywords": [
+    "chrome-extension",
+    "testing",
+    "ai",
+    "claude",
+    "visual-testing",
+    "ui-testing",
+    "automation",
+    "developer-tools"
+  ],
   "type": "module",
   "bin": {
     "popcorn": "./hook/dist/cli.js"

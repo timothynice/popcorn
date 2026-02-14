@@ -7,3 +7,7 @@ tapes/
 coverage/
 .DS_Store
 *.log
+
+# Claude Code agent working files (contain hardcoded paths)
+.claude/agents/
+.claude/agent-memory/

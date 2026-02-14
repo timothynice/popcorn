@@ -2,6 +2,8 @@
   "name": "@popcorn/extension",
   "version": "0.1.0",
   "private": true,
+  "description": "Chrome extension for autonomous visual UI testing",
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "build": "vite build",

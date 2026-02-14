@@ -13,7 +13,7 @@ Popcorn is an autonomous UI testing tool for Claude Code. When Claude edits a fr
 ### 1. Clone and build
 
 ```bash
-git clone <repo-url> popcorn
+git clone https://github.com/timothynice/popcorn.git popcorn
 cd popcorn
 npm install
 npm run build
