@@ -179,7 +179,7 @@ export function detectModalOrDialog(): ModalInfo | null {
     const style = getComputedStyle(el);
     if (style.position !== 'fixed' && style.position !== 'absolute') continue;
     const zIndex = parseInt(style.zIndex, 10);
-    if (isNaN(zIndex) || zIndex < 100) continue;
+    if (isNaN(zIndex) || zIndex < 1000) continue;
     if (!isVisible(el)) continue;
 
     const rect = el.getBoundingClientRect();

@@ -474,19 +474,32 @@ async function navigateTab(tabId: number, url: string): Promise<void> {
  * which does a full URL navigation.
  */
 async function goBackTab(tabId: number): Promise<void> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      chrome.tabs.onUpdated.removeListener(onUpdated);
+      resolve(); // Resolve even on timeout — best-effort
+    }, 5000);
+
     const onUpdated = (
       updatedTabId: number,
       changeInfo: chrome.tabs.TabChangeInfo,
     ) => {
       if (updatedTabId === tabId && changeInfo.status === 'complete') {
+        clearTimeout(timeout);
         chrome.tabs.onUpdated.removeListener(onUpdated);
         resolve();
       }
     };
 
     chrome.tabs.onUpdated.addListener(onUpdated);
-    chrome.tabs.goBack(tabId);
+    chrome.tabs.goBack(tabId, () => {
+      // chrome.tabs.goBack uses a callback; check for runtime errors
+      if (chrome.runtime.lastError) {
+        clearTimeout(timeout);
+        chrome.tabs.onUpdated.removeListener(onUpdated);
+        reject(new Error(chrome.runtime.lastError.message));
+      }
+    });
   });
 }
 
@@ -853,7 +866,7 @@ async function exploreElement(
     );
   }
 
-  // 8. Dismiss modal if detected
+  // 8. Dismiss modal if detected (best-effort, never counts as failure)
   if (modalDetected) {
     try {
       await ensureContentScript(tabId);
@@ -862,7 +875,10 @@ async function exploreElement(
         action: 'dismiss_modal',
         description: 'Dismiss modal dialog',
       });
-      results.push(dismissResult);
+      // Only record if dismissal actually did something useful
+      if (dismissResult.passed && dismissResult.metadata?.dismissed) {
+        results.push(dismissResult);
+      }
       step++;
     } catch (err) {
       console.warn('[Popcorn] Modal dismissal failed:', err);
