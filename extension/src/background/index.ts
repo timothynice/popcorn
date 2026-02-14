@@ -170,6 +170,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           .then(() => sendResponse({ success: true }))
           .catch((err) => sendResponse({ success: false, error: err instanceof Error ? err.message : String(err) }));
         return true;
+      case 'get_plans':
+        fetchPlans()
+          .then((plans) => sendResponse({ success: true, plans }))
+          .catch((err) => sendResponse({ success: false, error: err instanceof Error ? err.message : String(err) }));
+        return true;
+      case 'get_plan':
+        fetchPlan(message.payload?.planName)
+          .then((plan) => sendResponse({ success: true, plan }))
+          .catch((err) => sendResponse({ success: false, error: err instanceof Error ? err.message : String(err) }));
+        return true;
       default:
         return false;
     }
@@ -417,6 +427,28 @@ async function updateHookConfig(config: unknown) {
     body: JSON.stringify({ config }),
   });
   if (!resp.ok) throw new Error('Failed to update config');
+}
+
+async function fetchPlans() {
+  const discovery = await discoverHookPort();
+  if (!discovery) throw new Error('Hook not connected');
+  const resp = await fetch(`http://127.0.0.1:${discovery.port}/plans`, {
+    headers: { 'X-Popcorn-Token': discovery.token },
+  });
+  if (!resp.ok) throw new Error('Failed to fetch plans');
+  const data = await resp.json();
+  return data.plans;
+}
+
+async function fetchPlan(planName: string) {
+  const discovery = await discoverHookPort();
+  if (!discovery) throw new Error('Hook not connected');
+  const resp = await fetch(`http://127.0.0.1:${discovery.port}/plans/${planName}`, {
+    headers: { 'X-Popcorn-Token': discovery.token },
+  });
+  if (!resp.ok) throw new Error('Failed to fetch plan');
+  const data = await resp.json();
+  return data.plan;
 }
 
 // -- Signal extension installation --

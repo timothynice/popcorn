@@ -256,6 +256,38 @@ export class BridgeServer {
       });
   }
 
+  /** GET /plans — lists all test plan names. Requires token. */
+  private handleGetPlans(req: http.IncomingMessage, res: http.ServerResponse): void {
+    if (!this.checkToken(req, res)) return;
+
+    (async () => {
+      const { listTestPlans } = await import('./plan-loader.js');
+      const testPlansDir = (this.config.testPlansDir as string) || 'test-plans';
+      const plans = await listTestPlans(testPlansDir);
+      this.json(res, 200, { ok: true, plans });
+    })().catch((err) => {
+      log.error('Failed to list plans', { error: (err as Error).message });
+      this.json(res, 500, { ok: false, error: 'Failed to list plans' });
+    });
+  }
+
+  /** GET /plans/:planName — loads a specific test plan. Requires token. */
+  private handleGetPlan(req: http.IncomingMessage, res: http.ServerResponse, url: string): void {
+    if (!this.checkToken(req, res)) return;
+
+    const planName = url.slice(7); // Remove '/plans/' prefix
+
+    (async () => {
+      const { loadTestPlan } = await import('./plan-loader.js');
+      const testPlansDir = (this.config.testPlansDir as string) || 'test-plans';
+      const plan = await loadTestPlan(planName, testPlansDir);
+      this.json(res, 200, { ok: true, plan });
+    })().catch((err) => {
+      log.error('Failed to load plan', { planName, error: (err as Error).message });
+      this.json(res, 404, { ok: false, error: 'Plan not found' });
+    });
+  }
+
   /** Validates the X-Popcorn-Token header. Returns false and sends 401 if invalid. */
   private checkToken(req: http.IncomingMessage, res: http.ServerResponse): boolean {
     const headerToken = req.headers['x-popcorn-token'];
