@@ -1,3 +1,9 @@
+export interface ConsoleLogEntry {
+  level: 'log' | 'warn' | 'error' | 'info';
+  message: string;
+  timestamp: number;
+}
+
 export interface StepResult {
   stepNumber: number;
   action: string;
@@ -9,6 +15,8 @@ export interface StepResult {
   timestamp: number;
   /** Optional structured metadata populated by action handlers (e.g., URLs, assertion values). */
   metadata?: Record<string, unknown>;
+  /** Console logs captured during this step's execution. */
+  consoleLogs?: ConsoleLogEntry[];
 }
 
 export interface ScreenshotCapture {

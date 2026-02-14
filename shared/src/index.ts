@@ -8,6 +8,7 @@ export type {
 } from './test-plan.js';
 
 export type {
+  ConsoleLogEntry,
   StepResult,
   ScreenshotCapture,
   VideoMetadata,

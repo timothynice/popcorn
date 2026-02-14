@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { StatusBar } from './components/StatusBar';
+import { TestButtonArea } from './components/TestButtonArea';
 import { TapeList } from './components/TapeList';
 import { TapeDetail } from './components/TapeDetail';
 import { SettingsPanel } from './components/SettingsPanel';
@@ -107,6 +108,7 @@ function App() {
     // Feed view (default)
     return (
       <div className={styles.feed}>
+        <TestButtonArea onClick={() => setCurrentView('test')} />
         {showNoPageWarning && (
           <div className={styles.warningBanner}>
             <span className={styles.warningIcon}>!</span>
@@ -142,7 +144,6 @@ function App() {
           error={extensionError}
           hookConnected={hookConnected}
           onSettingsClick={() => setCurrentView('settings')}
-          onTestClick={() => setCurrentView('test')}
           showBack={currentView === 'detail'}
           onBack={handleBackToFeed}
         />

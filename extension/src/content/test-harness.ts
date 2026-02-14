@@ -1,30 +1,42 @@
 import type { TestStep, StepResult } from '@popcorn/shared';
 import { executeAction } from './actions.js';
+import { ConsoleCapture } from './console-capture.js';
+
+const consoleCapture = new ConsoleCapture();
 
 export async function executeTestPlan(steps: TestStep[]): Promise<StepResult[]> {
   const results: StepResult[] = [];
+  consoleCapture.start();
 
-  for (const step of steps) {
-    const result = await executeAction(step);
+  try {
+    for (const step of steps) {
+      const stepStartTime = Date.now();
+      const result = await executeAction(step);
 
-    // Promote screenshot data URL from metadata to the top-level field
-    // so the orchestrator's screenshot extraction logic can find it.
-    if (result.metadata?.screenshotDataUrl) {
-      result.screenshotDataUrl = result.metadata.screenshotDataUrl as string;
-    }
+      // Attach console logs captured during this step
+      result.consoleLogs = consoleCapture.getLogsSince(stepStartTime);
 
-    results.push(result);
+      // Promote screenshot data URL from metadata to the top-level field
+      // so the orchestrator's screenshot extraction logic can find it.
+      if (result.metadata?.screenshotDataUrl) {
+        result.screenshotDataUrl = result.metadata.screenshotDataUrl as string;
+      }
 
-    // Continue on most failures — the background decides recovery strategy.
-    // Only break if a navigate action fails (content script context is about to be destroyed).
-    if (!result.passed) {
-      console.warn(
-        `[Popcorn] Step ${step.stepNumber} (${step.action}) failed: ${result.error}`,
-      );
-      if (step.action === 'navigate') {
-        break;
+      results.push(result);
+
+      // Continue on most failures — the background decides recovery strategy.
+      // Only break if a navigate action fails (content script context is about to be destroyed).
+      if (!result.passed) {
+        console.warn(
+          `[Popcorn] Step ${step.stepNumber} (${step.action}) failed: ${result.error}`,
+        );
+        if (step.action === 'navigate') {
+          break;
+        }
       }
     }
+  } finally {
+    consoleCapture.stop();
   }
 
   return results;

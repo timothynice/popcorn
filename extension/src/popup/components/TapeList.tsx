@@ -63,15 +63,20 @@ export function TapeList({
   return (
     <div className={styles.container}>
       <div className={styles.list}>
+        <h3 className={styles.sectionLabel}>Most Recent Test</h3>
         {tapes.map((tape, index) => (
-          <TapeCard
-            key={tape.id}
-            tape={tape}
-            onClick={() => onSelectTape(tape.id)}
-            isSelected={selectedTapeId === tape.id}
-            onRerun={onRerun ? () => onRerun(tape.id) : undefined}
-            variant={index === 0 ? 'hero' : 'compact'}
-          />
+          <React.Fragment key={tape.id}>
+            {index === 1 && tapes.length > 1 && (
+              <h3 className={styles.sectionLabel}>Previous Tests</h3>
+            )}
+            <TapeCard
+              tape={tape}
+              onClick={() => onSelectTape(tape.id)}
+              isSelected={selectedTapeId === tape.id}
+              onRerun={onRerun ? () => onRerun(tape.id) : undefined}
+              variant={index === 0 ? 'hero' : 'compact'}
+            />
+          </React.Fragment>
         ))}
       </div>
     </div>

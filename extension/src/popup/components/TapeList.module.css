@@ -8,6 +8,17 @@
   flex-direction: column;
 }
 
+.sectionLabel {
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin: 0;
+  padding: 10px 12px 4px 12px;
+}
+
 .loading {
   display: flex;
   flex-direction: column;

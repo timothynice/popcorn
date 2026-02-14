@@ -1,5 +1,8 @@
 import React, { useState } from 'react';
 import type { TapeRecord } from '@popcorn/shared';
+import { ExpandableStep } from './ExpandableStep';
+import { Lightbox } from './Lightbox';
+import { downloadAllScreenshotsZip } from '../utils/download';
 import styles from './TapeDetail.module.css';
 
 interface TapeDetailProps {
@@ -30,6 +33,7 @@ export function TapeDetail({ tape }: TapeDetailProps) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isRerunning, setIsRerunning] = useState(false);
   const [rerunError, setRerunError] = useState<string | null>(null);
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
 
   const passedSteps = tape.steps.filter((s) => s.passed).length;
   const totalSteps = tape.steps.length;
@@ -61,6 +65,21 @@ export function TapeDetail({ tape }: TapeDetailProps) {
     }
   };
 
+  const handleHeroClick = () => {
+    if (hasVideo) {
+      setIsPlaying(true);
+    } else if (tape.screenshots.length > 0) {
+      setLightboxIndex(0);
+    }
+  };
+
+  const handleScreenshotClick = (dataUrl: string) => {
+    const index = tape.screenshots.findIndex((s) => s.dataUrl === dataUrl);
+    if (index >= 0) {
+      setLightboxIndex(index);
+    }
+  };
+
   return (
     <div className={styles.container}>
       <div className={styles.content}>
@@ -79,20 +98,16 @@ export function TapeDetail({ tape }: TapeDetailProps) {
           </div>
         ) : heroImageUrl ? (
           <div
-            className={`${styles.heroMedia} ${hasVideo ? styles.heroClickable : ''}`}
-            onClick={hasVideo ? () => setIsPlaying(true) : undefined}
-            role={hasVideo ? 'button' : undefined}
-            tabIndex={hasVideo ? 0 : undefined}
-            onKeyDown={
-              hasVideo
-                ? (e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      setIsPlaying(true);
-                    }
-                  }
-                : undefined
-            }
+            className={`${styles.heroMedia} ${styles.heroClickable}`}
+            onClick={handleHeroClick}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                handleHeroClick();
+              }
+            }}
           >
             <img
               src={heroImageUrl}
@@ -105,7 +120,7 @@ export function TapeDetail({ tape }: TapeDetailProps) {
               </div>
             )}
             <span className={`${styles.statusDot} ${tape.passed ? styles.statusPass : styles.statusFail}`}>
-              {tape.passed ? '✓' : '✗'}
+              {tape.passed ? '\u2713' : '\u2717'}
             </span>
             {hasVideo && tape.videoUrl && (
               <a
@@ -166,32 +181,11 @@ export function TapeDetail({ tape }: TapeDetailProps) {
           <h3 className={styles.sectionTitle}>Steps</h3>
           <div className={styles.steps}>
             {tape.steps.map((step) => (
-              <div
+              <ExpandableStep
                 key={step.stepNumber}
-                className={`${styles.step} ${step.passed ? styles.stepPassed : styles.stepFailed}`}
-              >
-                <div className={styles.stepHeader}>
-                  <span className={styles.stepIcon}>
-                    {step.passed ? '\u2713' : '\u2717'}
-                  </span>
-                  <span className={styles.stepNumber}>
-                    Step {step.stepNumber}
-                  </span>
-                  <span className={styles.stepAction}>{step.action}</span>
-                  <span className={styles.stepDuration}>
-                    {formatDuration(step.duration)}
-                  </span>
-                </div>
-                <p className={styles.stepDescription}>{step.description}</p>
-                {step.error && (
-                  <div className={styles.stepError}>
-                    <span className={styles.stepErrorLabel}>Error:</span>
-                    <span className={styles.stepErrorMessage}>
-                      {step.error}
-                    </span>
-                  </div>
-                )}
-              </div>
+                step={step}
+                onScreenshotClick={handleScreenshotClick}
+              />
             ))}
           </div>
         </section>
@@ -224,10 +218,31 @@ export function TapeDetail({ tape }: TapeDetailProps) {
         {/* 8. Screenshots grid (if multiple — hero already shows primary image) */}
         {tape.screenshots.length > 1 && (
           <section className={styles.section}>
-            <h3 className={styles.sectionTitle}>Screenshots</h3>
+            <div className={styles.screenshotHeader}>
+              <h3 className={styles.sectionTitle}>Screenshots</h3>
+              <button
+                className={styles.downloadAllBtn}
+                onClick={() => downloadAllScreenshotsZip(tape.screenshots, tape.demoName)}
+                title="Download all screenshots as ZIP"
+              >
+                {'\u2193'} All (ZIP)
+              </button>
+            </div>
             <div className={styles.screenshots}>
               {tape.screenshots.map((screenshot, index) => (
-                <div key={index} className={styles.screenshot}>
+                <div
+                  key={index}
+                  className={styles.screenshot}
+                  onClick={() => setLightboxIndex(index)}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      setLightboxIndex(index);
+                    }
+                  }}
+                >
                   <img
                     src={screenshot.dataUrl}
                     alt={screenshot.label || `Step ${screenshot.stepNumber}`}
@@ -252,6 +267,17 @@ export function TapeDetail({ tape }: TapeDetailProps) {
           </p>
         )}
       </div>
+
+      {/* Lightbox */}
+      {lightboxIndex !== null && tape.screenshots.length > 0 && (
+        <Lightbox
+          screenshots={tape.screenshots}
+          currentIndex={lightboxIndex}
+          demoName={tape.demoName}
+          onClose={() => setLightboxIndex(null)}
+          onNavigate={setLightboxIndex}
+        />
+      )}
     </div>
   );
 }

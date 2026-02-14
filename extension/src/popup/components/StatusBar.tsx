@@ -8,7 +8,6 @@ interface StatusBarProps {
   error: string | null;
   hookConnected: boolean;
   onSettingsClick: () => void;
-  onTestClick: () => void;
   /** When true, show a back button instead of the status dot + text. */
   showBack?: boolean;
   /** Callback fired when the back button is clicked. */
@@ -21,7 +20,6 @@ export function StatusBar({
   error,
   hookConnected,
   onSettingsClick,
-  onTestClick,
   showBack,
   onBack,
 }: StatusBarProps) {
@@ -68,18 +66,6 @@ export function StatusBar({
         <span className={`${styles.hookDot} ${hookConnected ? styles.hookConnected : styles.hookDisconnected}`} />
         <span className={styles.hookLabel}>Hook</span>
       </div>
-      <button
-        type="button"
-        className={styles.testButton}
-        onClick={onTestClick}
-        aria-label="Test"
-        title="Run tests on current page"
-      >
-        <svg width="10" height="12" viewBox="0 0 10 12" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M1 1L9 6L1 11V1Z" fill="currentColor" />
-        </svg>
-        Test
-      </button>
       <button
         type="button"
         className={styles.gearButton}

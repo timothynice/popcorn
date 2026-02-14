@@ -398,6 +398,35 @@
 
 /* ---- Screenshots ---- */
 
+.screenshotHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.screenshotHeader .sectionTitle {
+  margin-bottom: 0;
+}
+
+.downloadAllBtn {
+  padding: 3px 8px;
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.downloadAllBtn:hover {
+  background: var(--bg-card);
+  color: var(--text-primary);
+}
+
 .screenshots {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
@@ -408,6 +437,12 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.screenshot:hover {
+  opacity: 0.8;
 }
 
 .screenshotImage {
