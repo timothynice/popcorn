@@ -17,6 +17,11 @@ export function SettingsPanel({
 }: SettingsPanelProps) {
   const [tapeCount, setTapeCount] = useState<number | null>(null);
   const [clearing, setClearing] = useState(false);
+  const [config, setConfig] = useState<Record<string, unknown> | null>(null);
+  const [loadingConfig, setLoadingConfig] = useState(false);
+  const [configError, setConfigError] = useState<string | null>(null);
+  const [editingBaseUrl, setEditingBaseUrl] = useState(false);
+  const [baseUrlValue, setBaseUrlValue] = useState('');
 
   useEffect(() => {
     chrome.runtime.sendMessage({ type: 'get_tape_count' })

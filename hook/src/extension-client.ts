@@ -30,6 +30,8 @@ export interface ExtensionClientOptions {
   timeoutMs?: number;
   /** Preferred starting port for the HTTP bridge server. Default: 7890 */
   bridgePort?: number;
+  /** Configuration object to expose via bridge /config endpoint */
+  config?: Record<string, unknown>;
 }
 
 export class ExtensionClient {
@@ -39,6 +41,7 @@ export class ExtensionClient {
   private projectRoot: string;
   private timeoutMs: number;
   private bridgePort: number;
+  private config: Record<string, unknown>;
   private connected = false;
   private resultCallbacks: Map<
     string,
@@ -52,6 +55,7 @@ export class ExtensionClient {
     });
     this.timeoutMs = options.timeoutMs ?? 30000;
     this.bridgePort = options.bridgePort ?? 7890;
+    this.config = options.config ?? {};
   }
 
   /**
@@ -61,7 +65,7 @@ export class ExtensionClient {
   async connect(): Promise<void> {
     // Try HTTP transport first
     try {
-      this.bridgeServer = new BridgeServer({ preferredPort: this.bridgePort });
+      this.bridgeServer = new BridgeServer({ preferredPort: this.bridgePort, config: this.config });
       const port = await this.bridgeServer.start();
 
       // Write bridge.json for discoverability

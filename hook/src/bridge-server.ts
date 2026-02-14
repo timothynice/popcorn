@@ -30,10 +30,12 @@ export class BridgeServer {
   private token: string;
   private queue: PopcornMessage[] = [];
   private resultCallbacks: ResultCallback[] = [];
+  private config: Record<string, unknown>;
 
-  constructor(options?: { preferredPort?: number }) {
+  constructor(options?: { preferredPort?: number; config?: Record<string, unknown> }) {
     this.preferredPort = options?.preferredPort ?? 7890;
     this.token = crypto.randomBytes(16).toString('hex');
+    this.config = options?.config ?? {};
   }
 
   /**
@@ -98,6 +100,19 @@ export class BridgeServer {
     this.resultCallbacks.push(cb);
   }
 
+  /** Updates the config object. */
+  setConfig(config: Record<string, unknown>): void {
+    this.config = config;
+  }
+
+  /** Saves config to popcorn.config.json in the project root. */
+  private async saveConfigToDisk(config: Record<string, unknown>): Promise<void> {
+    const fs = await import('node:fs/promises');
+    const path = await import('node:path');
+    const configPath = path.resolve(process.cwd(), 'popcorn.config.json');
+    await fs.writeFile(configPath, JSON.stringify(config, null, 2), 'utf-8');
+  }
+
   // --------------- private ---------------
 
   /** Wraps server.listen in a promise for async/await port probing. */
@@ -139,6 +154,10 @@ export class BridgeServer {
       this.handlePoll(req, res);
     } else if (url === '/result' && req.method === 'POST') {
       this.handleResult(req, res);
+    } else if (url === '/config' && req.method === 'GET') {
+      this.handleGetConfig(req, res);
+    } else if (url === '/config' && req.method === 'POST') {
+      this.handleSetConfig(req, res);
     } else {
       this.json(res, 404, { ok: false, error: 'Not found' });
     }
@@ -193,6 +212,43 @@ export class BridgeServer {
       })
       .catch(() => {
         this.json(res, 400, { ok: false, error: 'Failed to read request body' });
+      });
+  }
+
+  /** GET /config — returns current config. Requires token. */
+  private handleGetConfig(req: http.IncomingMessage, res: http.ServerResponse): void {
+    if (!this.checkToken(req, res)) return;
+    this.json(res, 200, { ok: true, config: this.config });
+  }
+
+  /** POST /config — updates config. Requires token. */
+  private handleSetConfig(req: http.IncomingMessage, res: http.ServerResponse): void {
+    if (!this.checkToken(req, res)) return;
+
+    this.readBody(req)
+      .then(async (body) => {
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(body);
+        } catch {
+          this.json(res, 400, { ok: false, error: 'Invalid JSON' });
+          return;
+        }
+
+        const data = parsed as Record<string, unknown>;
+        if (!data.config || typeof data.config !== 'object') {
+          this.json(res, 400, { ok: false, error: 'Missing config object' });
+          return;
+        }
+
+        this.config = data.config as Record<string, unknown>;
+        await this.saveConfigToDisk(this.config);
+        log.info('Config updated and saved');
+
+        this.json(res, 200, { ok: true });
+      })
+      .catch(() => {
+        this.json(res, 500, { ok: false, error: 'Failed to save config' });
       });
   }
 

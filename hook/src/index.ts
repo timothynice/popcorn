@@ -57,6 +57,7 @@ export async function setup(
   const client = new ExtensionClient({
     projectRoot: root,
     pollIntervalMs: overrides?.debounceMs ?? undefined,
+    config: config as Record<string, unknown>,
   });
 
   try {

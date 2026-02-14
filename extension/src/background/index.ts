@@ -8,7 +8,7 @@
 import type { PopcornMessage, StartDemoMessage } from '@popcorn/shared';
 import { isPopcornMessage, createMessage } from '@popcorn/shared';
 import { initExternalMessaging } from './external-messaging.js';
-import { initBridgePolling, isHookConnected } from './bridge-client.js';
+import { initBridgePolling, isHookConnected, discoverHookPort } from './bridge-client.js';
 import { runFullDemo, runExplorationDemo, reloadTab } from './demo-flow.js';
 import type { ExplorationPlan } from '@popcorn/shared';
 import { captureScreenshot } from '../capture/screenshot.js';
@@ -157,6 +157,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       case 'clear_tapes':
         ensureTapeStore()
           .then(() => tapeStore.clear())
+          .then(() => sendResponse({ success: true }))
+          .catch((err) => sendResponse({ success: false, error: err instanceof Error ? err.message : String(err) }));
+        return true;
+      case 'get_config':
+        fetchHookConfig()
+          .then((config) => sendResponse({ success: true, config }))
+          .catch((err) => sendResponse({ success: false, error: err instanceof Error ? err.message : String(err) }));
+        return true;
+      case 'set_config':
+        updateHookConfig(message.payload?.config)
           .then(() => sendResponse({ success: true }))
           .catch((err) => sendResponse({ success: false, error: err instanceof Error ? err.message : String(err) }));
         return true;
@@ -385,6 +395,28 @@ async function handleStartDemoMessage(
     updateStatus('error', errorMsg);
     throw error;
   }
+}
+
+async function fetchHookConfig() {
+  const discovery = await discoverHookPort();
+  if (!discovery) throw new Error('Hook not connected');
+  const resp = await fetch(`http://127.0.0.1:${discovery.port}/config`, {
+    headers: { 'X-Popcorn-Token': discovery.token },
+  });
+  if (!resp.ok) throw new Error('Failed to fetch config');
+  const data = await resp.json();
+  return data.config;
+}
+
+async function updateHookConfig(config: unknown) {
+  const discovery = await discoverHookPort();
+  if (!discovery) throw new Error('Hook not connected');
+  const resp = await fetch(`http://127.0.0.1:${discovery.port}/config`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Popcorn-Token': discovery.token },
+    body: JSON.stringify({ config }),
+  });
+  if (!resp.ok) throw new Error('Failed to update config');
 }
 
 // -- Signal extension installation --
