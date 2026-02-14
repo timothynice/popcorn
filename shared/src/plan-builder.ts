@@ -13,6 +13,30 @@ export interface DetectedElement {
   href?: string;
   inputType?: string;
   label?: string;
+  mayNavigate?: boolean;
+}
+
+/** A single element to explore in the per-element loop. */
+export interface ExplorationTarget {
+  selector: string;
+  selectorFallback?: string;
+  type: 'button' | 'link';
+  label: string;
+  href?: string;
+  mayNavigate: boolean;
+}
+
+/**
+ * An exploration plan consumed by the background's per-element loop.
+ * Unlike TestPlan (a flat step list), this separates form-fill steps
+ * from clickable targets. The background dynamically handles
+ * screenshots, navigation detection, and recovery for each target.
+ */
+export interface ExplorationPlan {
+  baseUrl: string;
+  mode: BuildStepsMode;
+  targets: ExplorationTarget[];
+  formFillSteps: TestStep[];
 }
 
 /** Placeholder values for generated test data, keyed by field name patterns. */
@@ -131,7 +155,6 @@ export function buildSteps(
 
     // Phase 1: Click each button, screenshot
     // No navigate-back between buttons — most button clicks stay on the same page.
-    // A single navigate-back after all buttons ensures we're at baseUrl for the link phase.
     for (const btn of buttons) {
       const label = btn.label ?? btn.selector;
       steps.push({
@@ -142,37 +165,26 @@ export function buildSteps(
       });
       steps.push({
         stepNumber: stepNum++,
+        action: 'wait',
+        description: 'Wait for transition',
+        condition: 'timeout',
+        timeout: 400,
+      } as TestStep);
+      steps.push({
+        stepNumber: stepNum++,
         action: 'screenshot',
         description: `After clicking ${label}`,
       });
     }
 
-    // Return to base after buttons (in case any button navigated away)
-    if (buttons.length > 0) {
-      steps.push({
-        stepNumber: stepNum++,
-        action: 'navigate',
-        description: 'Return to page',
-        target: baseUrl,
-      });
-      steps.push({
-        stepNumber: stepNum++,
-        action: 'wait',
-        description: 'Wait for page load',
-        condition: 'timeout',
-        timeout: 500,
-      } as TestStep);
-    }
-
-    // Phase 2: Navigate to each link destination, screenshot
+    // Phase 2: Click each link, screenshot, go back via browser history
     for (const link of links) {
       const label = link.label ?? link.selector;
-      const resolvedHref = resolveUrl(link.href!, baseUrl);
       steps.push({
         stepNumber: stepNum++,
-        action: 'navigate',
-        description: `Navigate to ${label}`,
-        target: resolvedHref,
+        action: 'click',
+        description: `Click ${label}`,
+        selector: link.selector,
       });
       steps.push({
         stepNumber: stepNum++,
@@ -186,22 +198,17 @@ export function buildSteps(
         action: 'screenshot',
         description: `${label} destination`,
       });
-    }
-
-    // Navigate back after visiting links
-    if (links.length > 0) {
       steps.push({
         stepNumber: stepNum++,
-        action: 'navigate',
-        description: 'Return to page',
-        target: baseUrl,
+        action: 'go_back',
+        description: 'Return via browser back',
       });
       steps.push({
         stepNumber: stepNum++,
         action: 'wait',
-        description: 'Wait for page load',
+        description: 'Wait for page restore',
         condition: 'timeout',
-        timeout: 500,
+        timeout: 300,
       } as TestStep);
     }
   } else {
@@ -215,11 +222,24 @@ export function buildSteps(
     const toClick =
       primaryButtons.length > 0 ? primaryButtons.slice(0, 3) : buttons.slice(0, 1);
     for (const btn of toClick) {
+      const label = btn.label ?? btn.selector;
       steps.push({
         stepNumber: stepNum++,
         action: 'click',
-        description: `Click ${btn.label ?? btn.selector}`,
+        description: `Click ${label}`,
         selector: btn.selector,
+      });
+      steps.push({
+        stepNumber: stepNum++,
+        action: 'wait',
+        description: 'Wait for transition',
+        condition: 'timeout',
+        timeout: 400,
+      } as TestStep);
+      steps.push({
+        stepNumber: stepNum++,
+        action: 'screenshot',
+        description: `After clicking ${label}`,
       });
     }
 
@@ -239,12 +259,11 @@ export function buildSteps(
 
     for (const link of linksToFollow) {
       const label = link.label ?? link.selector;
-      const resolvedHref = resolveUrl(link.href!, baseUrl);
       steps.push({
         stepNumber: stepNum++,
-        action: 'navigate',
-        description: `Navigate to ${label}`,
-        target: resolvedHref,
+        action: 'click',
+        description: `Click ${label}`,
+        selector: link.selector,
       });
       steps.push({
         stepNumber: stepNum++,
@@ -258,22 +277,17 @@ export function buildSteps(
         action: 'screenshot',
         description: `${label} page`,
       });
-    }
-
-    // Navigate back after following links
-    if (linksToFollow.length > 0) {
       steps.push({
         stepNumber: stepNum++,
-        action: 'navigate',
-        description: 'Return to page',
-        target: baseUrl,
+        action: 'go_back',
+        description: 'Return via browser back',
       });
       steps.push({
         stepNumber: stepNum++,
         action: 'wait',
-        description: 'Wait for page load',
+        description: 'Wait for page restore',
         condition: 'timeout',
-        timeout: 500,
+        timeout: 300,
       } as TestStep);
     }
 
@@ -298,4 +312,124 @@ export function buildSteps(
   });
 
   return steps;
+}
+
+// -- Regex filters shared between buildSteps and buildExplorationPlan --
+const PRIMARY_BUTTON_LABELS =
+  /submit|save|send|login|sign.?up|register|continue|next|create|confirm|add|delete|remove|search/i;
+
+const PRIMARY_LINK_LABELS =
+  /about|dashboard|settings|profile|home|contact|products|features|pricing|docs|help|faq/i;
+
+/**
+ * Builds an ExplorationPlan from detected elements.
+ * Unlike buildSteps, this does NOT pre-generate wait/screenshot/go_back steps.
+ * The background's per-element loop handles those dynamically based on
+ * observed outcomes (URL changes, modals, DOM stability).
+ *
+ * Modes:
+ * - `smart`: primary-intent buttons (cap 3) + primary navigation links (cap 3)
+ * - `exhaustive`: all buttons + all internal links
+ */
+export function buildExplorationPlan(
+  elements: DetectedElement[],
+  baseUrl: string,
+  mode: BuildStepsMode = 'smart',
+): ExplorationPlan {
+  const normaliseUrl = (u: string) => u.replace(/\/+$/, '').replace(/#$/, '');
+
+  // Build form-fill steps (same as buildSteps)
+  const formFillSteps: TestStep[] = [];
+  let stepNum = 1;
+
+  const inputs = elements.filter((e) => e.type === 'input' || e.type === 'textarea');
+  for (const input of inputs) {
+    const fieldName = input.label ?? input.name ?? input.selector;
+    const value = getPlaceholderValue(input.name, input.inputType);
+    formFillSteps.push({
+      stepNumber: stepNum++,
+      action: 'fill',
+      description: `Fill ${fieldName}`,
+      selector: input.selector,
+      value,
+    });
+  }
+
+  const selects = elements.filter((e) => e.type === 'select');
+  for (const sel of selects) {
+    formFillSteps.push({
+      stepNumber: stepNum++,
+      action: 'select',
+      description: `Select option in ${sel.label ?? sel.name ?? sel.selector}`,
+      selector: sel.selector,
+      value: '',
+    });
+  }
+
+  const checkboxes = elements.filter((e) => e.type === 'checkbox');
+  for (const cb of checkboxes) {
+    formFillSteps.push({
+      stepNumber: stepNum++,
+      action: 'check',
+      description: `Check ${cb.label ?? cb.name ?? cb.selector}`,
+      selector: cb.selector,
+    });
+  }
+
+  // Build exploration targets
+  const allButtons = elements.filter((e) => e.type === 'button');
+  const allLinks = elements.filter((e) => {
+    if (e.type !== 'link' || !e.href) return false;
+    const resolved = resolveUrl(e.href, baseUrl);
+    return normaliseUrl(resolved) !== normaliseUrl(baseUrl);
+  });
+
+  let buttons: DetectedElement[];
+  let links: DetectedElement[];
+
+  if (mode === 'exhaustive') {
+    buttons = allButtons;
+    links = allLinks;
+  } else {
+    // Smart mode: filter by primary intent, cap at 3 each
+    const primaryButtons = allButtons.filter((b) =>
+      PRIMARY_BUTTON_LABELS.test(b.label || b.name || ''),
+    );
+    buttons =
+      primaryButtons.length > 0 ? primaryButtons.slice(0, 3) : allButtons.slice(0, 1);
+
+    const primaryLinks = allLinks.filter((l) =>
+      PRIMARY_LINK_LABELS.test(l.label || l.name || l.href || ''),
+    );
+    links =
+      primaryLinks.length > 0 ? primaryLinks.slice(0, 3) : allLinks.slice(0, 3);
+  }
+
+  const targets: ExplorationTarget[] = [];
+
+  for (const btn of buttons) {
+    targets.push({
+      selector: btn.selector,
+      type: 'button',
+      label: btn.label ?? btn.selector,
+      mayNavigate: btn.mayNavigate ?? false,
+    });
+  }
+
+  for (const link of links) {
+    targets.push({
+      selector: link.selector,
+      type: 'link',
+      label: link.label ?? link.selector,
+      href: link.href,
+      mayNavigate: true,
+    });
+  }
+
+  return {
+    baseUrl,
+    mode,
+    targets,
+    formFillSteps,
+  };
 }

@@ -6,7 +6,7 @@ import { SettingsPanel } from './components/SettingsPanel';
 import { TestPanel } from './components/TestPanel';
 import { useExtensionState } from './hooks/useExtensionState';
 import { useTapes } from './hooks/useTapes';
-import type { TestPlan, StartDemoMessage } from '@popcorn/shared';
+import type { TestPlan, StartDemoMessage, ExplorationPlan } from '@popcorn/shared';
 import { createMessage } from '@popcorn/shared';
 import styles from './App.module.css';
 
@@ -36,12 +36,14 @@ function App() {
   };
 
   /** Send start_demo and await the result. */
-  const sendStartDemo = async (plan: TestPlan, demoCriteria: string[]) => {
+  const sendStartDemo = async (plan: TestPlan | ExplorationPlan, demoCriteria: string[]) => {
     setDemoRunning(true);
     try {
+      // ExplorationPlan has `targets`, TestPlan has `planName`
+      const planName = 'planName' in plan ? plan.planName : `exploration-${plan.mode}`;
       const message = createMessage<StartDemoMessage>('start_demo', {
-        testPlanId: plan.planName,
-        testPlan: plan,
+        testPlanId: planName,
+        testPlan: plan as any, // background discriminates via 'targets' field
         acceptanceCriteria: demoCriteria,
         triggeredBy: 'popup',
       });
@@ -67,7 +69,7 @@ function App() {
   };
 
   /** Run a demo with a given test plan and criteria (from TestPanel). */
-  const handleRunTestDemo = async (plan: TestPlan, criteria: string[]) => {
+  const handleRunTestDemo = async (plan: TestPlan | ExplorationPlan, criteria: string[]) => {
     await sendStartDemo(plan, criteria);
   };
 

@@ -1,4 +1,9 @@
 import type { TestStep, StepResult } from '@popcorn/shared';
+import {
+  waitForDomStability,
+  checkActionability,
+  detectModalOrDialog,
+} from './dom-utils.js';
 
 const DEFAULT_TIMEOUT = 5000;
 
@@ -55,6 +60,18 @@ export async function executeAction(step: TestStep): Promise<StepResult> {
           ? await handleMultiStateDiscovery(step)
           : await handleScreenshot(step);
         break;
+      case 'go_back':
+        result = await handleGoBack();
+        break;
+      case 'check_actionability':
+        result = await handleCheckActionability(step);
+        break;
+      case 'dismiss_modal':
+        result = await handleDismissModal();
+        break;
+      case 'get_page_state':
+        result = handleGetPageState();
+        break;
       case 'drag':
       case 'upload':
         result = { passed: false, error: `Action ${step.action} not yet implemented` };
@@ -105,19 +122,47 @@ async function handleNavigate(step: TestStep, timeout: number): Promise<ActionRe
   };
 }
 
+async function handleGoBack(): Promise<ActionResult> {
+  window.history.back();
+  await waitForTimeout(300);
+  return {
+    passed: true,
+    metadata: { finalUrl: window.location.href },
+  };
+}
+
 async function handleClick(step: TestStep, timeout: number): Promise<ActionResult> {
   const element = await findElement(step.selector, step.selectorFallback, timeout);
   if (!element) {
     throw new Error(`Element not found: ${step.selector}`);
   }
 
-  if (element instanceof HTMLElement) {
-    element.click();
-  } else {
+  if (!(element instanceof HTMLElement)) {
     throw new Error('Element is not clickable');
   }
 
-  return { passed: true };
+  const urlBefore = window.location.href;
+  element.click();
+
+  // Wait for DOM to settle after click (replaces fixed timeouts)
+  const domSettled = await waitForDomStability(3000, 150);
+
+  const urlAfter = window.location.href;
+  const urlChanged = urlAfter !== urlBefore;
+  const modal = detectModalOrDialog();
+
+  return {
+    passed: true,
+    metadata: {
+      urlBefore,
+      urlAfter,
+      urlChanged,
+      domSettled,
+      modalDetected: modal
+        ? { type: modal.type, selector: modal.selector, dismissSelector: modal.dismissSelector }
+        : null,
+    },
+  };
 }
 
 async function handleFill(step: TestStep, timeout: number): Promise<ActionResult> {
@@ -231,6 +276,11 @@ async function handleWait(step: TestStep, timeout: number): Promise<ActionResult
     // Simple network idle detection - wait for no new requests for 500ms
     await waitForTimeout(500);
     return { passed: true };
+  }
+
+  if (step.condition === 'domStable') {
+    const settled = await waitForDomStability(step.timeout || 2000, 150);
+    return { passed: true, metadata: { domSettled: settled } };
   }
 
   throw new Error(`Unsupported wait condition: ${step.condition}`);
@@ -478,8 +528,9 @@ async function handleMultiStateDiscovery(_step: TestStep): Promise<ActionResult>
 
 async function handleScreenshot(_step: TestStep): Promise<ActionResult> {
   // Return a marker — the background will capture the screenshot after
-  // receiving results, avoiding nested Chrome messaging issues where
-  // captureVisibleTab responses get lost during content script execution.
+  // receiving results. This avoids Chrome messaging issues where
+  // chrome.runtime.sendMessage from inside an onMessage handler breaks
+  // the response channel and causes all content script results to be lost.
   return {
     passed: true,
     metadata: { needsBackgroundScreenshot: true },
@@ -512,6 +563,51 @@ async function handleKeypress(step: TestStep, timeout: number): Promise<ActionRe
   );
 
   return { passed: true };
+}
+
+async function handleCheckActionability(step: TestStep): Promise<ActionResult> {
+  const result = await checkActionability(step.selector || '', step.selectorFallback);
+  return {
+    passed: result.actionable,
+    error: result.actionable ? undefined : `Element not actionable: ${result.reason}`,
+    metadata: {
+      actionable: result.actionable,
+      reason: result.reason,
+    },
+  };
+}
+
+async function handleDismissModal(): Promise<ActionResult> {
+  const modal = detectModalOrDialog();
+  if (!modal) {
+    return { passed: true, metadata: { dismissed: false, reason: 'no_modal' } };
+  }
+
+  if (modal.dismissSelector) {
+    const dismissBtn = document.querySelector(modal.dismissSelector);
+    if (dismissBtn instanceof HTMLElement) {
+      dismissBtn.click();
+      await waitForDomStability(2000, 150);
+      return { passed: true, metadata: { dismissed: true, modalType: modal.type } };
+    }
+  }
+
+  // Try pressing Escape as fallback
+  document.dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+  );
+  await waitForTimeout(300);
+  return { passed: true, metadata: { dismissed: true, method: 'escape', modalType: modal.type } };
+}
+
+function handleGetPageState(): ActionResult {
+  return {
+    passed: true,
+    metadata: {
+      url: window.location.href,
+      title: document.title,
+    },
+  };
 }
 
 // Helper functions

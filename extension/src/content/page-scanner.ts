@@ -13,6 +13,36 @@ interface ScannedElement {
   href?: string;
   inputType?: string;
   label?: string;
+  mayNavigate?: boolean;
+}
+
+/**
+ * Checks whether an element is interactable (visible, not disabled).
+ * Filters out elements that can never be clicked before adding them to results.
+ */
+function isInteractable(el: Element): boolean {
+  if (!(el instanceof HTMLElement)) return false;
+  if (el.offsetWidth === 0 && el.offsetHeight === 0) return false;
+  const style = getComputedStyle(el);
+  if (style.display === 'none' || style.visibility === 'hidden') return false;
+  if ('disabled' in el && (el as any).disabled) return false;
+  if (el.getAttribute('aria-disabled') === 'true') return false;
+  // Inside a collapsed <details> that is not open (but not the <summary>)
+  const closedDetails = el.closest('details:not([open])');
+  if (closedDetails && !closedDetails.contains(el.closest('summary'))) return false;
+  return true;
+}
+
+/**
+ * Detects whether a button has navigation intent (onclick with location/href,
+ * parent <a>, or submit type with form action).
+ */
+function hasNavigationIntent(el: HTMLButtonElement): boolean {
+  const onclick = el.getAttribute('onclick') || '';
+  if (/location|navigate|href|window\.open/i.test(onclick)) return true;
+  if (el.type === 'submit' && el.form?.action) return true;
+  if (el.closest('a[href]')) return true;
+  return false;
 }
 
 /**
@@ -116,6 +146,7 @@ function scanPage(): ScannedElement[] {
   // Inputs (excluding hidden)
   document.querySelectorAll('input:not([type="hidden"])').forEach((input) => {
     const el = input as HTMLInputElement;
+    if (!isInteractable(el)) return;
     const type = el.type || 'text';
     const selector = buildUniqueSelector(el);
     const label = findLabel(el);
@@ -134,6 +165,7 @@ function scanPage(): ScannedElement[] {
         selector,
         name: el.name || undefined,
         label: label || el.value || undefined,
+        mayNavigate: !!el.form?.action,
       });
     } else {
       elements.push({
@@ -149,6 +181,7 @@ function scanPage(): ScannedElement[] {
   // Textareas
   document.querySelectorAll('textarea').forEach((textarea) => {
     const el = textarea as HTMLTextAreaElement;
+    if (!isInteractable(el)) return;
     elements.push({
       type: 'textarea',
       selector: buildUniqueSelector(el),
@@ -160,6 +193,7 @@ function scanPage(): ScannedElement[] {
   // Selects
   document.querySelectorAll('select').forEach((select) => {
     const el = select as HTMLSelectElement;
+    if (!isInteractable(el)) return;
     elements.push({
       type: 'select',
       selector: buildUniqueSelector(el),
@@ -171,11 +205,13 @@ function scanPage(): ScannedElement[] {
   // Buttons
   document.querySelectorAll('button').forEach((button) => {
     const el = button as HTMLButtonElement;
+    if (!isInteractable(el)) return;
     const label = el.textContent?.trim() || findLabel(el);
     elements.push({
       type: 'button',
       selector: buildUniqueSelector(el),
       label,
+      mayNavigate: hasNavigationIntent(el),
     });
   });
 
@@ -186,6 +222,7 @@ function scanPage(): ScannedElement[] {
 
   document.querySelectorAll('a[href]').forEach((link) => {
     const el = link as HTMLAnchorElement;
+    if (!isInteractable(el)) return;
     const rawHref = el.getAttribute('href');
     if (!rawHref || rawHref.startsWith('#') || rawHref.startsWith('javascript:')) return;
 

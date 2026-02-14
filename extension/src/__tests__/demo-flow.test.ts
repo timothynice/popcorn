@@ -7,7 +7,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { StartDemoMessage, TestPlan, DemoResult } from '@popcorn/shared';
 import { createMessage } from '@popcorn/shared';
-import { runFullDemo, reloadTab } from '../background/demo-flow.js';
+import { runFullDemo, reloadTab, groupStepRounds } from '../background/demo-flow.js';
 import type { DemoFlowDeps } from '../background/demo-flow.js';
 
 // Mock the offscreen manager so Recorder doesn't actually create documents
@@ -23,6 +23,7 @@ const chromeMock = {
     query: vi.fn(),
     update: vi.fn(),
     reload: vi.fn(),
+    goBack: vi.fn(),
     get: vi.fn(() => Promise.resolve({ url: '' })),
     captureVisibleTab: vi.fn(),
     onUpdated: {
@@ -229,6 +230,18 @@ describe('demo-flow', () => {
         }
       }, 0);
       return Promise.resolve({});
+    });
+
+    // Make chrome.tabs.goBack trigger the onUpdated listener with 'complete'
+    // so goBackTab resolves. Same pattern as chrome.tabs.update above.
+    chromeMock.tabs.goBack.mockImplementation((_tabId: number) => {
+      setTimeout(() => {
+        const listeners = chromeMock.tabs.onUpdated.addListener.mock.calls;
+        for (const [listener] of listeners) {
+          listener(_tabId, { status: 'complete' });
+        }
+      }, 0);
+      return Promise.resolve();
     });
 
     // Make chrome.tabs.reload trigger the onUpdated listener with 'complete'
@@ -627,7 +640,7 @@ describe('demo-flow', () => {
     expect(chromeMock.tabs.reload).toHaveBeenCalledWith(1);
   });
 
-  it('includes step results for background navigate/wait steps', async () => {
+  it('includes step results for background navigate and content script wait steps', async () => {
     const { store } = createMockTapeStore();
 
     const plan = createTestPlan({
@@ -639,8 +652,17 @@ describe('demo-flow', () => {
       ],
     });
 
+    // wait + click both run in content script now (wait is no longer a background step)
     chromeMock.tabs.sendMessage.mockResolvedValue({
       results: [
+        {
+          stepNumber: 2,
+          action: 'wait',
+          description: 'Wait for load',
+          passed: true,
+          duration: 100,
+          timestamp: Date.now(),
+        },
         {
           stepNumber: 3,
           action: 'click',
@@ -655,7 +677,7 @@ describe('demo-flow', () => {
     const message = createStartDemoMessage(plan);
     const result = await runFullDemo(message, 1, { tapeStore: store });
 
-    // Navigate + wait + click = 3 step results total
+    // Navigate (background) + wait (content) + click (content) = 3 step results total
     expect(result.steps.length).toBeGreaterThanOrEqual(3);
 
     // Background navigate step should be in the results
@@ -663,10 +685,144 @@ describe('demo-flow', () => {
     expect(navResult).toBeDefined();
     expect(navResult!.passed).toBe(true);
 
-    // Background wait step should be in the results
+    // Wait step runs in content script now, should still be in results
     const waitResult = result.steps.find((s) => s.action === 'wait');
     expect(waitResult).toBeDefined();
     expect(waitResult!.passed).toBe(true);
+  });
+
+  it('handles go_back steps via chrome.tabs.goBack in the background', async () => {
+    const { store } = createMockTapeStore();
+
+    const plan = createTestPlan({
+      planName: 'go-back-plan',
+      steps: [
+        { stepNumber: 1, action: 'navigate', description: 'Navigate to page', target: 'http://localhost:3000' },
+        { stepNumber: 2, action: 'click', description: 'Click link', selector: 'a.about' },
+        { stepNumber: 3, action: 'screenshot', description: 'Link destination' },
+        { stepNumber: 4, action: 'go_back', description: 'Return via browser back' },
+        { stepNumber: 5, action: 'wait', description: 'Wait for restore', condition: 'timeout', timeout: 300 } as any,
+        { stepNumber: 6, action: 'screenshot', description: 'Final state' },
+      ],
+    });
+
+    // Round 1 content: click + screenshot; Round 2 content: wait + screenshot
+    chromeMock.tabs.sendMessage
+      .mockResolvedValueOnce({ results: [] }) // ping check for round 1
+      .mockResolvedValueOnce({
+        results: [
+          { stepNumber: 2, action: 'click', description: 'Click link', passed: true, duration: 50, timestamp: Date.now() },
+          { stepNumber: 3, action: 'screenshot', description: 'Link destination', passed: true, duration: 0, timestamp: Date.now(), metadata: { needsBackgroundScreenshot: true } },
+        ],
+      })
+      .mockResolvedValueOnce({ results: [] }) // ping check for round 2
+      .mockResolvedValueOnce({
+        results: [
+          { stepNumber: 5, action: 'wait', description: 'Wait for restore', passed: true, duration: 300, timestamp: Date.now() },
+          { stepNumber: 6, action: 'screenshot', description: 'Final state', passed: true, duration: 0, timestamp: Date.now(), metadata: { needsBackgroundScreenshot: true } },
+        ],
+      });
+
+    chromeMock.tabs.captureVisibleTab.mockImplementation((_opts: any, cb: Function) => {
+      cb('data:image/png;base64,captured');
+    });
+
+    const message = createStartDemoMessage(plan);
+    const result = await runFullDemo(message, 1, { tapeStore: store });
+
+    // go_back should have been called via chrome.tabs.goBack
+    expect(chromeMock.tabs.goBack).toHaveBeenCalledWith(1);
+
+    // go_back step should appear in results
+    const goBackResult = result.steps.find((s) => s.action === 'go_back');
+    expect(goBackResult).toBeDefined();
+    expect(goBackResult!.passed).toBe(true);
+
+    // wait step should appear in results (now runs in content script)
+    const waitResult = result.steps.find((s) => s.action === 'wait');
+    expect(waitResult).toBeDefined();
+    expect(waitResult!.passed).toBe(true);
+  });
+
+  describe('groupStepRounds', () => {
+    it('keeps click-wait-screenshot in one round', () => {
+      const steps = [
+        { stepNumber: 1, action: 'navigate' as const, description: 'Go', target: '/page' },
+        { stepNumber: 2, action: 'click' as const, description: 'Click btn', selector: '#btn' },
+        { stepNumber: 3, action: 'wait' as const, description: 'Wait', condition: 'timeout', timeout: 400 },
+        { stepNumber: 4, action: 'screenshot' as const, description: 'Capture' },
+      ];
+      const rounds = groupStepRounds(steps);
+      expect(rounds).toHaveLength(1);
+      expect(rounds[0].backgroundSteps).toHaveLength(1); // navigate
+      expect(rounds[0].contentSteps).toHaveLength(3); // click, wait, screenshot
+    });
+
+    it('splits at screenshot boundaries for multiple click-wait-screenshot sequences', () => {
+      const steps = [
+        { stepNumber: 1, action: 'navigate' as const, description: 'Go', target: '/page' },
+        { stepNumber: 2, action: 'click' as const, description: 'Click btn1', selector: '#btn1' },
+        { stepNumber: 3, action: 'wait' as const, description: 'Wait', condition: 'timeout', timeout: 400 },
+        { stepNumber: 4, action: 'screenshot' as const, description: 'After btn1' },
+        { stepNumber: 5, action: 'click' as const, description: 'Click btn2', selector: '#btn2' },
+        { stepNumber: 6, action: 'wait' as const, description: 'Wait', condition: 'timeout', timeout: 400 },
+        { stepNumber: 7, action: 'screenshot' as const, description: 'After btn2' },
+        { stepNumber: 8, action: 'click' as const, description: 'Click btn3', selector: '#btn3' },
+        { stepNumber: 9, action: 'wait' as const, description: 'Wait', condition: 'timeout', timeout: 400 },
+        { stepNumber: 10, action: 'screenshot' as const, description: 'After btn3' },
+      ];
+      const rounds = groupStepRounds(steps);
+      // 3 rounds: each ending at a screenshot
+      expect(rounds).toHaveLength(3);
+
+      // Round 1: bg=[navigate], cs=[click, wait, screenshot]
+      expect(rounds[0].backgroundSteps).toHaveLength(1);
+      expect(rounds[0].backgroundSteps[0].action).toBe('navigate');
+      expect(rounds[0].contentSteps).toHaveLength(3);
+      expect(rounds[0].contentSteps.map(s => s.action)).toEqual(['click', 'wait', 'screenshot']);
+
+      // Round 2: bg=[], cs=[click, wait, screenshot]
+      expect(rounds[1].backgroundSteps).toHaveLength(0);
+      expect(rounds[1].contentSteps).toHaveLength(3);
+      expect(rounds[1].contentSteps.map(s => s.action)).toEqual(['click', 'wait', 'screenshot']);
+
+      // Round 3: bg=[], cs=[click, wait, screenshot]
+      expect(rounds[2].backgroundSteps).toHaveLength(0);
+      expect(rounds[2].contentSteps).toHaveLength(3);
+      expect(rounds[2].contentSteps.map(s => s.action)).toEqual(['click', 'wait', 'screenshot']);
+    });
+
+    it('splits at go_back boundaries and screenshot boundaries together', () => {
+      const steps = [
+        { stepNumber: 1, action: 'navigate' as const, description: 'Go', target: '/page' },
+        { stepNumber: 2, action: 'click' as const, description: 'Click link', selector: 'a.about' },
+        { stepNumber: 3, action: 'screenshot' as const, description: 'Link dest' },
+        { stepNumber: 4, action: 'go_back' as const, description: 'Back' },
+        { stepNumber: 5, action: 'click' as const, description: 'Click link 2', selector: 'a.contact' },
+        { stepNumber: 6, action: 'screenshot' as const, description: 'Link 2 dest' },
+      ];
+      const rounds = groupStepRounds(steps);
+      // Round 1: bg=[navigate], cs=[click, screenshot]
+      // Round 2: bg=[go_back], cs=[click, screenshot]
+      expect(rounds).toHaveLength(2);
+      expect(rounds[0].backgroundSteps.map(s => s.action)).toEqual(['navigate']);
+      expect(rounds[0].contentSteps.map(s => s.action)).toEqual(['click', 'screenshot']);
+      expect(rounds[1].backgroundSteps.map(s => s.action)).toEqual(['go_back']);
+      expect(rounds[1].contentSteps.map(s => s.action)).toEqual(['click', 'screenshot']);
+    });
+
+    it('handles plans with no screenshots in a single round', () => {
+      const steps = [
+        { stepNumber: 1, action: 'navigate' as const, description: 'Go', target: '/page' },
+        { stepNumber: 2, action: 'click' as const, description: 'Click', selector: '#btn' },
+        { stepNumber: 3, action: 'wait' as const, description: 'Wait', condition: 'timeout', timeout: 400 },
+        { stepNumber: 4, action: 'click' as const, description: 'Click 2', selector: '#btn2' },
+      ];
+      const rounds = groupStepRounds(steps);
+      expect(rounds).toHaveLength(1);
+      expect(rounds[0].backgroundSteps).toHaveLength(1);
+      expect(rounds[0].contentSteps).toHaveLength(3);
+    });
   });
 
   it('captures screenshots from background for steps with needsBackgroundScreenshot marker', async () => {

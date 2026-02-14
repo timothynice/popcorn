@@ -15,14 +15,15 @@ export async function executeTestPlan(steps: TestStep[]): Promise<StepResult[]> 
 
     results.push(result);
 
-    // Stop on critical action errors (but not assertion failures)
-    if (!result.passed && step.action !== 'assert') {
-      console.error(
-        `Critical error at step ${step.stepNumber}: ${result.error}`,
+    // Continue on most failures — the background decides recovery strategy.
+    // Only break if a navigate action fails (content script context is about to be destroyed).
+    if (!result.passed) {
+      console.warn(
+        `[Popcorn] Step ${step.stepNumber} (${step.action}) failed: ${result.error}`,
       );
-      // Continue with remaining steps but mark them as skipped
-      // Actually, let's stop execution here for critical failures
-      break;
+      if (step.action === 'navigate') {
+        break;
+      }
     }
   }
 

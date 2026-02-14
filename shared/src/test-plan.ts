@@ -12,7 +12,11 @@ export type ActionType =
   | 'keypress'
   | 'drag'
   | 'upload'
-  | 'screenshot';
+  | 'screenshot'
+  | 'go_back'
+  | 'check_actionability'
+  | 'dismiss_modal'
+  | 'get_page_state';
 
 export type AssertionType =
   | 'text'
@@ -27,7 +31,8 @@ export type WaitCondition =
   | 'visible'
   | 'hidden'
   | 'networkIdle'
-  | 'timeout';
+  | 'timeout'
+  | 'domStable';
 
 export interface TestStep {
   stepNumber: number;

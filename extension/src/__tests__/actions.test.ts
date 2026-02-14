@@ -18,6 +18,14 @@ vi.stubGlobal('Element', dom.window.Element);
 vi.stubGlobal('Event', dom.window.Event);
 vi.stubGlobal('MouseEvent', dom.window.MouseEvent);
 vi.stubGlobal('KeyboardEvent', dom.window.KeyboardEvent);
+vi.stubGlobal('MutationObserver', dom.window.MutationObserver);
+vi.stubGlobal('getComputedStyle', dom.window.getComputedStyle);
+
+// requestAnimationFrame mock for actionability stability check
+vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
+  setTimeout(() => cb(Date.now()), 0);
+  return 0;
+});
 
 describe('actions', () => {
   beforeEach(() => {
@@ -427,5 +435,103 @@ describe('actions', () => {
 
     expect(result.passed).toBe(false);
     expect(result.error).toContain('not yet implemented');
+  });
+
+  describe('check_actionability', () => {
+    it('returns not actionable for missing element', async () => {
+      const step: TestStep = {
+        stepNumber: 1,
+        action: 'check_actionability',
+        description: 'Check missing',
+        selector: '#nonexistent',
+      };
+
+      const result = await executeAction(step);
+      expect(result.passed).toBe(false);
+      expect(result.metadata?.actionable).toBe(false);
+      expect(result.metadata?.reason).toBe('not_found');
+    });
+
+    it('returns reason in metadata for non-actionable elements', async () => {
+      const step: TestStep = {
+        stepNumber: 1,
+        action: 'check_actionability',
+        description: 'Check missing',
+        selector: '#does-not-exist',
+      };
+
+      const result = await executeAction(step);
+      expect(result.metadata?.actionable).toBe(false);
+      expect(result.metadata?.reason).toBeDefined();
+    });
+  });
+
+  describe('get_page_state', () => {
+    it('returns current URL and title', async () => {
+      const step: TestStep = {
+        stepNumber: 1,
+        action: 'get_page_state',
+        description: 'Get state',
+      };
+
+      const result = await executeAction(step);
+      expect(result.passed).toBe(true);
+      expect(result.metadata?.url).toBeDefined();
+      expect(result.metadata?.title).toBeDefined();
+    });
+  });
+
+  describe('dismiss_modal', () => {
+    it('returns no_modal when no modal is present', async () => {
+      document.body.innerHTML = '<div>Normal content</div>';
+
+      const step: TestStep = {
+        stepNumber: 1,
+        action: 'dismiss_modal',
+        description: 'Dismiss modal',
+      };
+
+      const result = await executeAction(step);
+      expect(result.passed).toBe(true);
+      expect(result.metadata?.dismissed).toBe(false);
+      expect(result.metadata?.reason).toBe('no_modal');
+    });
+  });
+
+  describe('click with observation', () => {
+    it('returns urlChanged and domSettled in metadata', async () => {
+      document.body.innerHTML = '<button id="btn">Click</button>';
+
+      const step: TestStep = {
+        stepNumber: 1,
+        action: 'click',
+        description: 'Click button',
+        selector: '#btn',
+      };
+
+      const result = await executeAction(step);
+      expect(result.passed).toBe(true);
+      expect(result.metadata).toBeDefined();
+      expect(result.metadata?.urlBefore).toBeDefined();
+      expect(result.metadata?.urlAfter).toBeDefined();
+      expect(typeof result.metadata?.urlChanged).toBe('boolean');
+      expect(typeof result.metadata?.domSettled).toBe('boolean');
+    });
+  });
+
+  describe('domStable wait condition', () => {
+    it('resolves with domSettled metadata', async () => {
+      const step: TestStep = {
+        stepNumber: 1,
+        action: 'wait',
+        description: 'Wait for DOM stability',
+        condition: 'domStable',
+        timeout: 500,
+      };
+
+      const result = await executeAction(step);
+      expect(result.passed).toBe(true);
+      expect(result.metadata?.domSettled).toBeDefined();
+    });
   });
 });

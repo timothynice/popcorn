@@ -9,7 +9,8 @@ import type { PopcornMessage, StartDemoMessage } from '@popcorn/shared';
 import { isPopcornMessage, createMessage } from '@popcorn/shared';
 import { initExternalMessaging } from './external-messaging.js';
 import { initBridgePolling, isHookConnected } from './bridge-client.js';
-import { runFullDemo, reloadTab } from './demo-flow.js';
+import { runFullDemo, runExplorationDemo, reloadTab } from './demo-flow.js';
+import type { ExplorationPlan } from '@popcorn/shared';
 import { captureScreenshot } from '../capture/screenshot.js';
 import { TapeStore } from '../storage/tape-store.js';
 import type { DemoState } from './state.js';
@@ -343,6 +344,25 @@ async function handleStartDemoMessage(
   }
 
   try {
+    // Route exploration plans to the per-element loop
+    const testPlan = message.payload.testPlan;
+    if ('targets' in testPlan) {
+      console.log('[Popcorn] Routing to exploration demo');
+      const demoResult = await runExplorationDemo(
+        testPlan as unknown as ExplorationPlan,
+        tabId,
+        {
+          tapeStore,
+          onTapeSaved: notifyTapeSaved,
+          skipRecording: true, // exploration demo manages its own screenshots
+        },
+      );
+
+      updateStatus('complete');
+      setTimeout(() => updateStatus('idle'), 3000);
+      return createMessage('demo_result', demoResult);
+    }
+
     // Record video when triggered from the popup (user gesture available for
     // tabCapture). Skip recording for hook-triggered demos (no gesture).
     const skipRecording = message.payload.triggeredBy !== 'popup';

@@ -48,10 +48,11 @@ export {
   evaluateAllCriteria,
 } from './acceptance.js';
 
-export type { DetectedElement, BuildStepsMode } from './plan-builder.js';
+export type { DetectedElement, BuildStepsMode, ExplorationTarget, ExplorationPlan } from './plan-builder.js';
 
 export {
   buildSteps,
+  buildExplorationPlan,
   getPlaceholderValue,
   resolveUrl,
   PLACEHOLDER_VALUES,

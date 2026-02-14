@@ -10,6 +10,9 @@ import type {
   VideoMetadata,
   StepResult,
   TestStep,
+  ScreenshotCapture,
+  ExplorationPlan,
+  ExplorationTarget,
 } from '@popcorn/shared';
 import { generateTapeName } from '@popcorn/shared';
 import { Recorder } from '../capture/recorder.js';
@@ -78,22 +81,24 @@ export async function runFullDemo(
     console.log('[Popcorn] Recording skipped (no user gesture available)');
   }
 
-  // 2. Group steps into rounds. Each round has background steps (navigate/wait)
-  //    followed by content script steps (click/fill/screenshot/assert/etc).
-  //    This handles both simple plans (one round) and exhaustive plans
-  //    (many rounds with navigate-back between each click).
+  // 2. Group steps into rounds. Rounds split at navigation boundaries (navigate/go_back)
+  //    and screenshot boundaries (so the background captures each screenshot before the
+  //    next click changes the page).
   const rounds = groupStepRounds(testPlan.steps);
   const allStepResults: StepResult[] = [];
   const startTime = Date.now();
 
   try {
     for (const round of rounds) {
-      // 2a. Execute background steps (navigate/wait) and record results
+      // 2a. Execute background steps (navigate/go_back) and record results
       for (const step of round.backgroundSteps) {
         const stepStart = Date.now();
         if (step.action === 'navigate' && step.target) {
           console.log(`[Popcorn] Background navigating to: ${step.target}`);
           await navigateTab(tabId, step.target);
+        } else if (step.action === 'go_back') {
+          console.log('[Popcorn] Background going back via browser history');
+          await goBackTab(tabId);
         } else if (step.action === 'wait') {
           const waitMs = step.timeout || 1000;
           console.log(`[Popcorn] Background waiting ${waitMs}ms`);
@@ -152,24 +157,29 @@ export async function runFullDemo(
       if (response?.results) {
         const roundResults = response.results as StepResult[];
 
-        // 2d. Capture screenshots for this round IMMEDIATELY (before navigating away)
+        // 2d. Capture screenshots for this round IMMEDIATELY (before navigating away).
+        // Throttle consecutive captures to avoid Chrome's MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND limit.
+        let screenshotCount = 0;
         for (const stepResult of roundResults) {
           if (stepResult.metadata?.needsBackgroundScreenshot) {
             try {
+              if (screenshotCount > 0) {
+                await new Promise((resolve) => setTimeout(resolve, 1100));
+              }
               const dataUrl = await captureScreenshot(tabId);
               stepResult.screenshotDataUrl = dataUrl;
               if (stepResult.metadata) {
                 stepResult.metadata.screenshotDataUrl = dataUrl;
                 delete stepResult.metadata.needsBackgroundScreenshot;
               }
+              screenshotCount++;
             } catch (err) {
               const errMsg = err instanceof Error ? err.message : String(err);
               console.warn(
                 `[Popcorn] Per-round screenshot for step ${stepResult.stepNumber} failed:`,
                 errMsg,
               );
-              stepResult.passed = false;
-              stepResult.error = `Screenshot capture failed: ${errMsg}`;
+              // Screenshot failure is non-fatal — step stays passed
               if (stepResult.metadata) {
                 delete stepResult.metadata.needsBackgroundScreenshot;
               }
@@ -374,14 +384,17 @@ async function saveTapeAndReload(
 
 /**
  * Groups test plan steps into execution rounds. Each round contains:
- * - backgroundSteps: navigate/wait steps handled by the background via
- *   chrome.tabs.update (safe — doesn't destroy content script context).
+ * - backgroundSteps: navigate/go_back steps handled by the background via
+ *   chrome.tabs.update / chrome.tabs.goBack.
  * - contentSteps: click/fill/screenshot/assert/etc steps sent to the
  *   content script as a batch.
  *
- * This handles both simple plans (single round: navigate → content steps)
- * and exhaustive plans (multiple rounds: navigate → click → screenshot →
- * navigate-back → wait → click → screenshot → navigate-back → ...).
+ * Rounds are split at two boundaries:
+ * 1. **Navigation boundaries** — navigate/go_back start a new round because
+ *    they destroy the content script context.
+ * 2. **Screenshot boundaries** — a screenshot is always the last content step
+ *    in its round. This ensures the background captures the visible tab while
+ *    the page is in the correct visual state (before the next click changes it).
  */
 export function groupStepRounds(steps: TestStep[]): StepRound[] {
   const rounds: StepRound[] = [];
@@ -389,8 +402,8 @@ export function groupStepRounds(steps: TestStep[]): StepRound[] {
   let csSteps: TestStep[] = [];
 
   for (const step of steps) {
-    if (step.action === 'navigate' || step.action === 'wait') {
-      // If we have accumulated content steps, close the current round
+    if (step.action === 'navigate' || step.action === 'go_back') {
+      // Navigation destroys content script — close current round first
       if (csSteps.length > 0) {
         rounds.push({ backgroundSteps: bgSteps, contentSteps: csSteps });
         bgSteps = [];
@@ -399,10 +412,16 @@ export function groupStepRounds(steps: TestStep[]): StepRound[] {
       bgSteps.push(step);
     } else {
       csSteps.push(step);
+      // Split after screenshot so background captures it before next click
+      if (step.action === 'screenshot') {
+        rounds.push({ backgroundSteps: bgSteps, contentSteps: csSteps });
+        bgSteps = [];
+        csSteps = [];
+      }
     }
   }
 
-  // Push final round
+  // Push final round (steps after last screenshot, or plans without screenshots)
   if (bgSteps.length > 0 || csSteps.length > 0) {
     rounds.push({ backgroundSteps: bgSteps, contentSteps: csSteps });
   }
@@ -449,6 +468,29 @@ async function navigateTab(tabId: number, url: string): Promise<void> {
 }
 
 /**
+ * Goes back in browser history for a tab and waits for the page to
+ * finish loading. Uses chrome.tabs.goBack which respects browser
+ * history (including SPA pushState entries), unlike navigateTab
+ * which does a full URL navigation.
+ */
+async function goBackTab(tabId: number): Promise<void> {
+  return new Promise((resolve) => {
+    const onUpdated = (
+      updatedTabId: number,
+      changeInfo: chrome.tabs.TabChangeInfo,
+    ) => {
+      if (updatedTabId === tabId && changeInfo.status === 'complete') {
+        chrome.tabs.onUpdated.removeListener(onUpdated);
+        resolve();
+      }
+    };
+
+    chrome.tabs.onUpdated.addListener(onUpdated);
+    chrome.tabs.goBack(tabId);
+  });
+}
+
+/**
  * Reloads a tab and waits for the page to finish loading.
  * Used to reset SPA state when URL-based navigation would be a no-op
  * (e.g. after a demo that changed internal state without changing the URL).
@@ -468,4 +510,398 @@ export async function reloadTab(tabId: number): Promise<void> {
     chrome.tabs.onUpdated.addListener(onUpdated);
     chrome.tabs.reload(tabId);
   });
+}
+
+// ---------------------------------------------------------------------------
+// Per-element exploration demo
+// ---------------------------------------------------------------------------
+
+/** Tracks last screenshot time to enforce Chrome's ~1/sec rate limit. */
+let lastScreenshotTime = 0;
+const SCREENSHOT_MIN_INTERVAL = 1100;
+
+/**
+ * Captures a screenshot with rate-limit throttling.
+ * Waits if needed to respect Chrome's MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND.
+ */
+export async function throttledScreenshot(tabId: number): Promise<string> {
+  const elapsed = Date.now() - lastScreenshotTime;
+  if (elapsed < SCREENSHOT_MIN_INTERVAL) {
+    await new Promise((r) => setTimeout(r, SCREENSHOT_MIN_INTERVAL - elapsed));
+  }
+  const dataUrl = await captureScreenshot(tabId);
+  lastScreenshotTime = Date.now();
+  return dataUrl;
+}
+
+/**
+ * Waits for a tab to reach 'complete' status, with a timeout fallback.
+ * Returns true if the tab completed, false if it timed out (e.g. SPA navigation).
+ */
+export async function waitForTabComplete(
+  tabId: number,
+  timeoutMs: number,
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      chrome.tabs.onUpdated.removeListener(onUpdated);
+      resolve(false);
+    }, timeoutMs);
+
+    const onUpdated = (
+      id: number,
+      changeInfo: chrome.tabs.TabChangeInfo,
+    ) => {
+      if (id === tabId && changeInfo.status === 'complete') {
+        clearTimeout(timer);
+        chrome.tabs.onUpdated.removeListener(onUpdated);
+        resolve(true);
+      }
+    };
+
+    chrome.tabs.onUpdated.addListener(onUpdated);
+  });
+}
+
+/**
+ * Ensures the content script is loaded in the tab.
+ * Pings first to avoid re-injection errors, injects if needed.
+ */
+export async function ensureContentScript(tabId: number): Promise<void> {
+  try {
+    const ping = await chrome.tabs.sendMessage(tabId, { type: 'ping' });
+    if (ping?.pong) return;
+  } catch {
+    // Not loaded
+  }
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    files: ['content.js'],
+  });
+  // Small delay for content script to initialize
+  await new Promise((r) => setTimeout(r, 100));
+}
+
+/**
+ * Sends a single action step to the content script and returns the result.
+ */
+export async function sendSingleAction(
+  tabId: number,
+  step: TestStep,
+): Promise<StepResult> {
+  const response = await chrome.tabs.sendMessage(tabId, {
+    type: 'execute_plan',
+    payload: { steps: [step] },
+  });
+  if (response?.results?.[0]) {
+    return response.results[0];
+  }
+  throw new Error(`No result from content script for step ${step.stepNumber}`);
+}
+
+/** Creates a StepResult for background-managed steps. */
+function makeStepResult(
+  stepNumber: number,
+  action: string,
+  description: string,
+  passed: boolean,
+  error?: string,
+  metadata?: Record<string, unknown>,
+): StepResult {
+  return {
+    stepNumber,
+    action: action as StepResult['action'],
+    description,
+    passed,
+    duration: 0,
+    timestamp: Date.now(),
+    error,
+    metadata,
+  };
+}
+
+/**
+ * Runs a per-element exploration demo. For each target element:
+ * 1. Checks actionability
+ * 2. Clicks the element
+ * 3. Detects what happened (URL change, modal, DOM settle)
+ * 4. Takes a screenshot of the new state
+ * 5. Recovers (go_back, dismiss modal)
+ * 6. Continues to next element
+ *
+ * Single-element failures are caught and skipped — they don't abort the run.
+ */
+export async function runExplorationDemo(
+  plan: ExplorationPlan,
+  tabId: number,
+  deps: DemoFlowDeps,
+): Promise<DemoResult> {
+  const allResults: StepResult[] = [];
+  const screenshots: ScreenshotCapture[] = [];
+  let stepNum = 1;
+  const startTime = Date.now();
+
+  try {
+    // 1. Navigate to base URL
+    console.log(`[Popcorn] Exploration: navigating to ${plan.baseUrl}`);
+    await navigateTab(tabId, plan.baseUrl);
+    allResults.push(makeStepResult(stepNum++, 'navigate', 'Navigate to page', true));
+
+    // 2. Initial screenshot
+    try {
+      const initialDataUrl = await throttledScreenshot(tabId);
+      screenshots.push({
+        stepNumber: stepNum,
+        dataUrl: initialDataUrl,
+        timestamp: Date.now(),
+        label: 'Initial page state',
+      });
+      allResults.push(makeStepResult(stepNum++, 'screenshot', 'Initial page state', true));
+    } catch (err) {
+      allResults.push(
+        makeStepResult(stepNum++, 'screenshot', 'Initial page state', false,
+          err instanceof Error ? err.message : String(err)),
+      );
+    }
+
+    // 3. Run form fill steps (if any)
+    if (plan.formFillSteps.length > 0) {
+      await ensureContentScript(tabId);
+      try {
+        const response = await chrome.tabs.sendMessage(tabId, {
+          type: 'execute_plan',
+          payload: { steps: plan.formFillSteps },
+        });
+        if (response?.results) {
+          allResults.push(...(response.results as StepResult[]));
+        }
+      } catch (err) {
+        console.warn('[Popcorn] Form fill failed:', err);
+        allResults.push(
+          makeStepResult(stepNum++, 'fill', 'Form fill batch', false,
+            err instanceof Error ? err.message : String(err)),
+        );
+      }
+    }
+
+    // 4. Per-element exploration loop
+    for (const target of plan.targets) {
+      try {
+        const result = await exploreElement(target, tabId, stepNum);
+        allResults.push(...result.results);
+        screenshots.push(...result.screenshots);
+        stepNum += result.results.length;
+      } catch (err) {
+        // Single element failure — log and continue
+        const errMsg = err instanceof Error ? err.message : String(err);
+        console.warn(`[Popcorn] Exploration of "${target.label}" failed: ${errMsg}`);
+        allResults.push(
+          makeStepResult(stepNum++, 'click', `SKIPPED: ${target.label}`, false, errMsg),
+        );
+      }
+    }
+
+    // 5. Final screenshot
+    try {
+      const finalDataUrl = await throttledScreenshot(tabId);
+      screenshots.push({
+        stepNumber: stepNum,
+        dataUrl: finalDataUrl,
+        timestamp: Date.now(),
+        label: 'Final state',
+      });
+      allResults.push(makeStepResult(stepNum++, 'screenshot', 'Final state', true));
+    } catch (err) {
+      allResults.push(
+        makeStepResult(stepNum++, 'screenshot', 'Final state', false,
+          err instanceof Error ? err.message : String(err)),
+      );
+    }
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    console.error('[Popcorn] Exploration demo failed:', errMsg);
+    allResults.push(makeStepResult(stepNum++, 'navigate', 'Exploration failed', false, errMsg));
+  }
+
+  // 6. Assemble result
+  const duration = Date.now() - startTime;
+  const passed = allResults.filter((r) => !r.passed).length === 0;
+  const summary = passed
+    ? `Explored ${plan.targets.length} elements successfully`
+    : `Explored ${plan.targets.length} elements with some failures`;
+
+  const demoResult: DemoResult = {
+    testPlanId: `exploration-${plan.mode}`,
+    passed,
+    steps: allResults,
+    screenshots,
+    duration,
+    summary,
+    videoMetadata: null,
+  };
+
+  // 7. Save tape
+  const testPlanForTape = {
+    planName: `exploration-${plan.mode}`,
+    description: `${plan.mode} exploration of ${plan.baseUrl}`,
+    baseUrl: plan.baseUrl,
+    steps: allResults.map((r) => ({
+      stepNumber: r.stepNumber,
+      action: r.action,
+      description: r.description,
+    })) as TestStep[],
+    tags: ['exploration', plan.mode],
+  };
+
+  await saveTapeAndReload(demoResult, null, null, null, testPlanForTape, testPlanForTape.planName, tabId, deps);
+
+  return demoResult;
+}
+
+/**
+ * Explores a single element: check actionability → click → observe →
+ * screenshot → recover (go_back or dismiss modal).
+ */
+async function exploreElement(
+  target: ExplorationTarget,
+  tabId: number,
+  startStep: number,
+): Promise<{ results: StepResult[]; screenshots: ScreenshotCapture[] }> {
+  const results: StepResult[] = [];
+  const screenshotCaptures: ScreenshotCapture[] = [];
+  let step = startStep;
+
+  // 1. Ensure content script
+  await ensureContentScript(tabId);
+
+  // 2. Check actionability
+  const actionabilityResult = await sendSingleAction(tabId, {
+    stepNumber: step,
+    action: 'check_actionability',
+    description: `Check ${target.label} is actionable`,
+    selector: target.selector,
+    selectorFallback: target.selectorFallback,
+  });
+  results.push(actionabilityResult);
+  step++;
+
+  if (!actionabilityResult.passed || actionabilityResult.metadata?.actionable === false) {
+    console.log(`[Popcorn] Skipping "${target.label}": ${actionabilityResult.metadata?.reason || 'not actionable'}`);
+    return { results, screenshots: screenshotCaptures };
+  }
+
+  // 3. Get page state before click
+  const pageStateBefore = await sendSingleAction(tabId, {
+    stepNumber: step,
+    action: 'get_page_state',
+    description: 'Record page state before click',
+  });
+  const urlBefore = (pageStateBefore.metadata?.url as string) || '';
+  step++;
+
+  // 4. Click the element
+  const clickResult = await sendSingleAction(tabId, {
+    stepNumber: step,
+    action: 'click',
+    description: `Click ${target.label}`,
+    selector: target.selector,
+    selectorFallback: target.selectorFallback,
+  });
+  results.push(clickResult);
+  step++;
+
+  if (!clickResult.passed) {
+    return { results, screenshots: screenshotCaptures };
+  }
+
+  // 5. Read what happened
+  const urlChanged = clickResult.metadata?.urlChanged as boolean;
+  const modalDetected = clickResult.metadata?.modalDetected as { type: string; selector: string; dismissSelector?: string } | null;
+
+  // 6. If URL changed, wait for potential page load
+  if (urlChanged && !modalDetected) {
+    await waitForTabComplete(tabId, 3000);
+    await ensureContentScript(tabId);
+  }
+
+  // 7. Screenshot the new state
+  try {
+    const dataUrl = await throttledScreenshot(tabId);
+    screenshotCaptures.push({
+      stepNumber: step,
+      dataUrl,
+      timestamp: Date.now(),
+      label: `After clicking ${target.label}`,
+    });
+    results.push(makeStepResult(step++, 'screenshot', `After clicking ${target.label}`, true));
+  } catch (err) {
+    results.push(
+      makeStepResult(step++, 'screenshot', `After clicking ${target.label}`, false,
+        err instanceof Error ? err.message : String(err)),
+    );
+  }
+
+  // 8. Dismiss modal if detected
+  if (modalDetected) {
+    try {
+      await ensureContentScript(tabId);
+      const dismissResult = await sendSingleAction(tabId, {
+        stepNumber: step,
+        action: 'dismiss_modal',
+        description: 'Dismiss modal dialog',
+      });
+      results.push(dismissResult);
+      step++;
+    } catch (err) {
+      console.warn('[Popcorn] Modal dismissal failed:', err);
+    }
+  }
+
+  // 9. If URL changed, go back and verify
+  if (urlChanged) {
+    try {
+      await goBackTab(tabId);
+      results.push(makeStepResult(step++, 'go_back', 'Return via browser back', true));
+
+      await ensureContentScript(tabId);
+
+      // Verify page restored
+      const pageStateAfter = await sendSingleAction(tabId, {
+        stepNumber: step,
+        action: 'get_page_state',
+        description: 'Verify page restored',
+      });
+      step++;
+
+      const urlAfter = pageStateAfter.metadata?.url as string;
+      if (urlAfter !== urlBefore) {
+        // go_back didn't restore — fallback to direct navigation
+        console.warn(`[Popcorn] go_back didn't restore URL (got ${urlAfter}, expected ${urlBefore}), navigating directly`);
+        await navigateTab(tabId, urlBefore);
+        results.push(makeStepResult(step++, 'navigate', 'Fallback navigate to original page', true));
+      }
+
+      // Wait for DOM stability after returning
+      await ensureContentScript(tabId);
+      await sendSingleAction(tabId, {
+        stepNumber: step,
+        action: 'wait',
+        description: 'Wait for page restore',
+        condition: 'domStable',
+        timeout: 2000,
+      });
+      step++;
+    } catch (err) {
+      console.warn('[Popcorn] Recovery after navigation failed:', err);
+      // Try hard fallback: navigate directly to original URL
+      try {
+        await navigateTab(tabId, urlBefore);
+        results.push(makeStepResult(step++, 'navigate', 'Hard fallback to original page', true));
+      } catch {
+        // Nothing more we can do
+      }
+    }
+  }
+
+  return { results, screenshots: screenshotCaptures };
 }

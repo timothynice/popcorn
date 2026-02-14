@@ -101,7 +101,7 @@ describe('test-harness', () => {
     expect(results[1].passed).toBe(true);
   });
 
-  it('stops on critical action error', async () => {
+  it('continues on non-navigate failures (click errors are non-fatal)', async () => {
     const steps: TestStep[] = [
       {
         stepNumber: 1,
@@ -119,7 +119,7 @@ describe('test-harness', () => {
       {
         stepNumber: 3,
         action: 'click',
-        description: 'This should not run',
+        description: 'This should still run',
         selector: '#btn3',
       },
     ];
@@ -131,11 +131,12 @@ describe('test-harness', () => {
 
     const results = await executeTestPlan(steps);
 
-    // Should only execute first 2 steps
-    expect(results).toHaveLength(2);
+    // All 3 steps should execute — only navigate failures break the loop
+    expect(results).toHaveLength(3);
     expect(results[0].passed).toBe(true);
     expect(results[1].passed).toBe(false);
     expect(results[1].error).toContain('Element not found');
+    expect(results[2].passed).toBe(true); // continues after failure
   });
 
   it('continues after assertion failures', async () => {

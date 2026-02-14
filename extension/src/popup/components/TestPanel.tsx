@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import type { TestPlan, TestStep, BuildStepsMode } from '@popcorn/shared';
-import { buildSteps } from '@popcorn/shared';
+import type { TestPlan, TestStep, BuildStepsMode, ExplorationPlan } from '@popcorn/shared';
+import { buildExplorationPlan } from '@popcorn/shared';
 import type { DetectedElement } from '@popcorn/shared';
 import { usePersistedCriteria } from '../hooks/usePersistedCriteria';
 import { CriteriaEditor } from './CriteriaEditor';
@@ -9,7 +9,7 @@ import styles from './TestPanel.module.css';
 
 interface TestPanelProps {
   onBack: () => void;
-  onRunDemo: (plan: TestPlan, criteria: string[]) => Promise<void>;
+  onRunDemo: (plan: TestPlan | ExplorationPlan, criteria: string[]) => Promise<void>;
   demoRunning: boolean;
 }
 
@@ -64,7 +64,7 @@ export function TestPanel({ onBack, onRunDemo, demoRunning }: TestPanelProps) {
   const [scanning, setScanning] = useState(true); // starts true — auto-scan on mount
   const [scanError, setScanError] = useState<string | null>(null);
   const [scannedElements, setScannedElements] = useState<DetectedElement[] | null>(null);
-  const [generatedPlan, setGeneratedPlan] = useState<TestPlan | null>(null);
+  const [generatedPlan, setGeneratedPlan] = useState<ExplorationPlan | null>(null);
   const [mode, setMode] = useState<BuildStepsMode>('smart');
   const [baseUrl, setBaseUrl] = useState<string>('/');
 
@@ -88,21 +88,13 @@ export function TestPanel({ onBack, onRunDemo, demoRunning }: TestPanelProps) {
         const elements: DetectedElement[] = response.elements || [];
         setScannedElements(elements);
 
-        // Build test plan from scanned elements
+        // Build exploration plan from scanned elements
         const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
         if (cancelled) return;
         const url = tabs[0]?.url || '/';
         setBaseUrl(url);
 
-        const steps = buildSteps(elements, url, mode);
-        const plan: TestPlan = {
-          planName: 'page-scan',
-          description: 'Test plan generated from live DOM scan',
-          baseUrl: url,
-          steps,
-          tags: ['auto-generated', 'page-scan'],
-        };
-        setGeneratedPlan(plan);
+        setGeneratedPlan(buildExplorationPlan(elements, url, mode));
       } catch (err) {
         if (!cancelled) {
           setScanError(err instanceof Error ? err.message : 'Scan failed');
@@ -122,14 +114,7 @@ export function TestPanel({ onBack, onRunDemo, demoRunning }: TestPanelProps) {
   // Rebuild plan when mode changes (without re-scanning)
   useEffect(() => {
     if (!scannedElements) return;
-    const steps = buildSteps(scannedElements, baseUrl, mode);
-    setGeneratedPlan({
-      planName: 'page-scan',
-      description: 'Test plan generated from live DOM scan',
-      baseUrl,
-      steps,
-      tags: ['auto-generated', 'page-scan'],
-    });
+    setGeneratedPlan(buildExplorationPlan(scannedElements, baseUrl, mode));
   }, [mode, scannedElements, baseUrl]);
 
   const handleRunDemo = async () => {

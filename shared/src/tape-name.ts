@@ -1,7 +1,9 @@
 import type { TestPlan, ActionType } from './test-plan.js';
 
 /** Actions that are "utility" and not counted as meaningful content actions. */
-const UTILITY_ACTIONS: Set<ActionType> = new Set(['wait', 'screenshot']);
+const UTILITY_ACTIONS: Set<ActionType> = new Set([
+  'wait', 'screenshot', 'go_back', 'check_actionability', 'get_page_state',
+]);
 
 /** Human-friendly display names for action types. */
 const ACTION_LABELS: Record<ActionType, string> = {
@@ -19,6 +21,10 @@ const ACTION_LABELS: Record<ActionType, string> = {
   drag: 'Drag',
   upload: 'Upload',
   screenshot: 'Screenshot',
+  go_back: 'Go Back',
+  check_actionability: 'Check Actionability',
+  dismiss_modal: 'Dismiss Modal',
+  get_page_state: 'Get Page State',
 };
 
 /** Plan names that are considered generic and should trigger auto-naming. */

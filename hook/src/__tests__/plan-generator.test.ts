@@ -153,7 +153,9 @@ describe('buildSteps', () => {
     expect(steps[2].action).toBe('select');
     expect(steps[3].action).toBe('check');
     expect(steps[4].action).toBe('click');
-    expect(steps[5].action).toBe('assert');
+    expect(steps[5].action).toBe('wait');
+    expect(steps[6].action).toBe('screenshot');
+    expect(steps[7].action).toBe('assert');
 
     // Verify step numbers are sequential
     steps.forEach((step, i) => {
@@ -209,7 +211,7 @@ describe('buildSteps', () => {
     expect(withoutForm.some((s) => s.action === 'assert')).toBe(false);
   });
 
-  it('exhaustive mode: clicks buttons and navigates to links', () => {
+  it('exhaustive mode: clicks buttons and clicks links with go_back', () => {
     const elements = [
       { type: 'button' as const, selector: 'button:nth-of-type(1)', label: 'Previous slide' },
       { type: 'button' as const, selector: 'button:nth-of-type(2)', label: 'Next slide' },
@@ -222,17 +224,16 @@ describe('buildSteps', () => {
     expect(steps[0].action).toBe('navigate');
     expect(steps[0].target).toBe('http://localhost:3000');
 
-    // Buttons are clicked (not links)
+    // Buttons and links are all clicked
     const clickSteps = steps.filter((s) => s.action === 'click');
-    expect(clickSteps).toHaveLength(2);
+    expect(clickSteps).toHaveLength(3);
     expect(clickSteps[0].description).toContain('Previous slide');
     expect(clickSteps[1].description).toContain('Next slide');
+    expect(clickSteps[2].description).toContain('About');
 
-    // Links are navigated to (not clicked)
-    const navSteps = steps.filter((s) => s.action === 'navigate');
-    const linkNavStep = navSteps.find((s) => s.target === 'http://localhost:3000/about');
-    expect(linkNavStep).toBeDefined();
-    expect(linkNavStep!.description).toContain('About');
+    // Links use go_back to return (not navigate)
+    const goBackSteps = steps.filter((s) => s.action === 'go_back');
+    expect(goBackSteps).toHaveLength(1);
 
     // Screenshots: 2 after-button + 1 link-destination + 1 final = 4
     const screenshotSteps = steps.filter((s) => s.action === 'screenshot');
@@ -244,23 +245,26 @@ describe('buildSteps', () => {
     });
   });
 
-  it('exhaustive mode: resolves relative link hrefs to absolute URLs', () => {
+  it('exhaustive mode: clicks links with their selectors', () => {
     const elements = [
       { type: 'link' as const, selector: 'a[href="/about"]', label: 'About', href: '/about' },
       { type: 'link' as const, selector: 'a[href="/contact"]', label: 'Contact', href: '/contact' },
     ];
 
     const steps = buildSteps(elements, 'http://localhost:8080', 'exhaustive');
-    const navSteps = steps.filter(
-      (s) => s.action === 'navigate' && s.target !== 'http://localhost:8080',
-    );
 
-    expect(navSteps).toHaveLength(2);
-    expect(navSteps[0].target).toBe('http://localhost:8080/about');
-    expect(navSteps[1].target).toBe('http://localhost:8080/contact');
+    // Links are clicked (not navigated to by URL)
+    const clickSteps = steps.filter((s) => s.action === 'click');
+    expect(clickSteps).toHaveLength(2);
+    expect(clickSteps[0].selector).toBe('a[href="/about"]');
+    expect(clickSteps[1].selector).toBe('a[href="/contact"]');
+
+    // Each link has a go_back after it
+    const goBackSteps = steps.filter((s) => s.action === 'go_back');
+    expect(goBackSteps).toHaveLength(2);
   });
 
-  it('exhaustive mode: no navigate-back between consecutive links or buttons', () => {
+  it('exhaustive mode: each link gets its own go_back', () => {
     const elements = [
       { type: 'button' as const, selector: 'button:nth-of-type(1)', label: 'Btn1' },
       { type: 'button' as const, selector: 'button:nth-of-type(2)', label: 'Btn2' },
@@ -270,11 +274,15 @@ describe('buildSteps', () => {
 
     const steps = buildSteps(elements, 'http://localhost:3000', 'exhaustive');
 
-    // Navigate-back to base: 1 initial + 1 after-buttons + 1 after-links = 3
-    const navBackSteps = steps.filter(
+    // Each link gets a go_back
+    const goBackSteps = steps.filter((s) => s.action === 'go_back');
+    expect(goBackSteps).toHaveLength(2);
+
+    // No navigate-back to baseUrl (only initial navigate to base)
+    const navToBase = steps.filter(
       (s) => s.action === 'navigate' && s.target === 'http://localhost:3000',
     );
-    expect(navBackSteps).toHaveLength(3);
+    expect(navToBase).toHaveLength(1); // Only the initial navigate
   });
 
   it('exhaustive mode: buttons come before links', () => {
@@ -285,11 +293,13 @@ describe('buildSteps', () => {
 
     const steps = buildSteps(elements, 'http://localhost:3000', 'exhaustive');
 
-    const clickIdx = steps.findIndex((s) => s.action === 'click');
-    const linkNavIdx = steps.findIndex(
-      (s) => s.action === 'navigate' && s.target === 'http://localhost:3000/about',
-    );
-    expect(clickIdx).toBeLessThan(linkNavIdx);
+    const clickSteps = steps.filter((s) => s.action === 'click');
+    // Button click comes before link click
+    const btnClick = clickSteps.find((s) => s.description?.includes('Submit'));
+    const linkClick = clickSteps.find((s) => s.description?.includes('About'));
+    expect(btnClick).toBeDefined();
+    expect(linkClick).toBeDefined();
+    expect(btnClick!.stepNumber).toBeLessThan(linkClick!.stepNumber);
   });
 
   it('exhaustive mode: still fills inputs before clicking', () => {
@@ -309,7 +319,7 @@ describe('buildSteps', () => {
     expect(clickSteps).toHaveLength(2);
   });
 
-  it('smart mode: follows up to 3 navigation links after button clicks', () => {
+  it('smart mode: clicks up to 3 links after button clicks', () => {
     const elements = [
       { type: 'button' as const, selector: 'button', label: 'Submit' },
       { type: 'link' as const, selector: 'a[href="/about"]', label: 'About Us', href: '/about' },
@@ -320,31 +330,33 @@ describe('buildSteps', () => {
 
     const steps = buildSteps(elements, 'http://localhost:3000', 'smart');
 
-    // Button click
+    // Button click + up to 3 link clicks
     const clickSteps = steps.filter((s) => s.action === 'click');
-    expect(clickSteps).toHaveLength(1);
+    expect(clickSteps.length).toBeGreaterThanOrEqual(2); // 1 button + at least 1 link
+    expect(clickSteps.length).toBeLessThanOrEqual(4); // 1 button + max 3 links
 
-    // Link navigation steps (up to 3 — about, contact, pricing match primary labels)
-    const linkNavSteps = steps.filter(
-      (s) => s.action === 'navigate' && s.target !== 'http://localhost:3000',
-    );
-    expect(linkNavSteps.length).toBeLessThanOrEqual(3);
-    expect(linkNavSteps.length).toBeGreaterThanOrEqual(1);
+    // Link clicks use go_back to return
+    const goBackSteps = steps.filter((s) => s.action === 'go_back');
+    expect(goBackSteps.length).toBeGreaterThanOrEqual(1);
+    expect(goBackSteps.length).toBeLessThanOrEqual(3);
   });
 
-  it('smart mode: navigates back after following links', () => {
+  it('smart mode: uses go_back after following links', () => {
     const elements = [
       { type: 'link' as const, selector: 'a[href="/about"]', label: 'About', href: '/about' },
     ];
 
     const steps = buildSteps(elements, 'http://localhost:3000', 'smart');
 
-    // Should have a navigate-back to base after the link
+    // Should use go_back instead of navigate-back to base
+    const goBackSteps = steps.filter((s) => s.action === 'go_back');
+    expect(goBackSteps.length).toBeGreaterThanOrEqual(1);
+
+    // No navigate-back to baseUrl (only initial navigate)
     const navBackSteps = steps.filter(
-      (s) => s.action === 'navigate' && s.target === 'http://localhost:3000'
-        && s.description === 'Return to page',
+      (s) => s.action === 'navigate' && s.description === 'Return to page',
     );
-    expect(navBackSteps.length).toBeGreaterThanOrEqual(1);
+    expect(navBackSteps).toHaveLength(0);
   });
 
   it('exhaustive mode: excludes links that resolve to baseUrl', () => {
@@ -356,13 +368,17 @@ describe('buildSteps', () => {
 
     const steps = buildSteps(elements, 'http://localhost:8080', 'exhaustive');
 
-    // Only /about should produce a navigate step (not / or the full base URL)
-    const linkNavSteps = steps.filter(
-      (s) => s.action === 'navigate' && s.target !== 'http://localhost:8080'
-        && s.description !== 'Return to page',
+    // Only /about should produce a click step for links (not / or the full base URL)
+    const linkClicks = steps.filter(
+      (s) => s.action === 'click' && s.selector?.includes('about'),
     );
-    expect(linkNavSteps).toHaveLength(1);
-    expect(linkNavSteps[0].target).toBe('http://localhost:8080/about');
+    expect(linkClicks).toHaveLength(1);
+
+    // Same-URL links excluded — no clicks for Home or Logo
+    const homeClicks = steps.filter(
+      (s) => s.action === 'click' && (s.description?.includes('Home') || s.description?.includes('Logo')),
+    );
+    expect(homeClicks).toHaveLength(0);
   });
 
   it('smart mode: excludes links that resolve to baseUrl', () => {
@@ -373,16 +389,20 @@ describe('buildSteps', () => {
 
     const steps = buildSteps(elements, 'http://localhost:3000', 'smart');
 
-    // Only /about should produce a navigate step
-    const linkNavSteps = steps.filter(
-      (s) => s.action === 'navigate' && s.target !== 'http://localhost:3000'
-        && s.description !== 'Return to page',
+    // Only /about should produce a click
+    const linkClicks = steps.filter(
+      (s) => s.action === 'click' && s.description?.includes('About'),
     );
-    expect(linkNavSteps).toHaveLength(1);
-    expect(linkNavSteps[0].target).toBe('http://localhost:3000/about');
+    expect(linkClicks).toHaveLength(1);
+
+    // Home link excluded
+    const homeClicks = steps.filter(
+      (s) => s.action === 'click' && s.description?.includes('Home'),
+    );
+    expect(homeClicks).toHaveLength(0);
   });
 
-  it('exhaustive mode: all same-URL links produces no link navigate steps', () => {
+  it('exhaustive mode: all same-URL links produces no link clicks', () => {
     const elements = [
       { type: 'link' as const, selector: 'a[href="/"]', label: 'Home', href: '/' },
       { type: 'link' as const, selector: 'a.brand', label: 'Brand', href: 'http://localhost:8080' },
@@ -394,19 +414,11 @@ describe('buildSteps', () => {
     // Button should still produce click + screenshot steps
     const clickSteps = steps.filter((s) => s.action === 'click');
     expect(clickSteps).toHaveLength(1);
+    expect(clickSteps[0].description).toContain('Click Me');
 
-    // No link navigation (both links resolve to base URL)
-    const linkNavSteps = steps.filter(
-      (s) => s.action === 'navigate' && s.target !== 'http://localhost:8080'
-        && s.description !== 'Return to page',
-    );
-    expect(linkNavSteps).toHaveLength(0);
-
-    // One navigate-back after all buttons (shared), no navigate-back for links
-    const returnSteps = steps.filter(
-      (s) => s.action === 'navigate' && s.description === 'Return to page',
-    );
-    expect(returnSteps).toHaveLength(1);
+    // No go_back steps (no links were followed)
+    const goBackSteps = steps.filter((s) => s.action === 'go_back');
+    expect(goBackSteps).toHaveLength(0);
   });
 });
 
