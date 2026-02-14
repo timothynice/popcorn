@@ -234,7 +234,8 @@ describe('demo-flow', () => {
 
     // Make chrome.tabs.goBack trigger the onUpdated listener with 'complete'
     // so goBackTab resolves. Same pattern as chrome.tabs.update above.
-    chromeMock.tabs.goBack.mockImplementation((_tabId: number) => {
+    chromeMock.tabs.goBack.mockImplementation((_tabId: number, callback?: () => void) => {
+      if (callback) callback(); // Signal no runtime error
       setTimeout(() => {
         const listeners = chromeMock.tabs.onUpdated.addListener.mock.calls;
         for (const [listener] of listeners) {
@@ -731,7 +732,7 @@ describe('demo-flow', () => {
     const result = await runFullDemo(message, 1, { tapeStore: store });
 
     // go_back should have been called via chrome.tabs.goBack
-    expect(chromeMock.tabs.goBack).toHaveBeenCalledWith(1);
+    expect(chromeMock.tabs.goBack).toHaveBeenCalledWith(1, expect.any(Function));
 
     // go_back step should appear in results
     const goBackResult = result.steps.find((s) => s.action === 'go_back');

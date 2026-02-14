@@ -161,7 +161,8 @@ describe('exploration-flow', () => {
       return Promise.resolve({});
     });
 
-    chromeMock.tabs.goBack.mockImplementation((_tabId: number) => {
+    chromeMock.tabs.goBack.mockImplementation((_tabId: number, callback?: () => void) => {
+      if (callback) callback(); // Signal no runtime error
       fireTabComplete(_tabId);
       return Promise.resolve();
     });
