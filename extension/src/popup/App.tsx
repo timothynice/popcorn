@@ -5,6 +5,7 @@ import { TapeList } from './components/TapeList';
 import { TapeDetail } from './components/TapeDetail';
 import { SettingsPanel } from './components/SettingsPanel';
 import { TestPanel } from './components/TestPanel';
+import { PlansPanel } from './components/PlansPanel';
 import { useExtensionState } from './hooks/useExtensionState';
 import { useTapes } from './hooks/useTapes';
 import type { TestPlan, StartDemoMessage, ExplorationPlan } from '@popcorn/shared';

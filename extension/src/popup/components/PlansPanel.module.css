@@ -1,0 +1,242 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.header {
+  padding: 12px 16px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.backButton {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  color: var(--accent-blue);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px 0;
+  transition: color 0.15s ease;
+}
+
+.backButton:hover {
+  color: var(--text-primary);
+}
+
+.title {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+}
+
+.notConnected {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  color: var(--text-secondary);
+  text-align: center;
+  margin: 32px 0;
+}
+
+.masterDetail {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  height: 100%;
+  overflow: hidden;
+}
+
+.listPanel {
+  border-right: 1px solid var(--border-color);
+  overflow-y: auto;
+  background: var(--bg-secondary);
+}
+
+.detailPanel {
+  overflow-y: auto;
+  padding: 16px;
+  background: var(--bg-primary);
+}
+
+.loading,
+.error,
+.empty,
+.noSelection {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  padding: 12px;
+  margin: 0;
+  text-align: center;
+}
+
+.loading,
+.empty,
+.noSelection {
+  color: var(--text-secondary);
+}
+
+.error {
+  color: var(--accent-red);
+}
+
+.planList {
+  display: flex;
+  flex-direction: column;
+}
+
+.planItem {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-primary);
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--border-color);
+  padding: 10px 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s ease;
+  word-break: break-word;
+}
+
+.planItem:hover {
+  background: var(--bg-card);
+}
+
+.planItem.selected {
+  background: var(--bg-card);
+  color: var(--accent-blue);
+  font-weight: 600;
+}
+
+.planDetail {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.planName {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.planDescription {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.planMeta {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.metaItem {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.tag {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-muted);
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
+  padding: 2px 6px;
+}
+
+.stepsList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.stepsTitle {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin: 0;
+}
+
+.stepItem {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.stepNumber {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  min-width: 20px;
+}
+
+.stepContent {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.stepAction {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--accent-blue);
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.stepDescription {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  color: var(--text-primary);
+  line-height: 1.4;
+}
+
+.runButton {
+  background: var(--accent-blue);
+  border: 1px solid var(--accent-blue);
+  border-radius: var(--radius);
+  color: white;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 8px 16px;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+  outline: none;
+  margin-top: 8px;
+}
+
+.runButton:hover {
+  opacity: 0.9;
+}
