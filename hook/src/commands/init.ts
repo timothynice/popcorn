@@ -9,7 +9,8 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { generatePlanFromFile, savePlan } from '../plan-generator.js';
+import { generatePlanFromFile, savePlan, sniffProjectDeps } from '../plan-generator.js';
+import type { ProjectContext } from '../plan-generator.js';
 
 export interface InitResult {
   /** Paths that were created. */
@@ -124,7 +125,8 @@ export async function runInit(projectRoot: string): Promise<InitResult> {
 
   if (!existing.some((f) => f.endsWith('.json'))) {
     // No existing plans — scan the watch directory for source files
-    const generated = await scanAndGeneratePlans(projectRoot, watchDir, testPlansDir);
+    const projectContext = await sniffProjectDeps(projectRoot);
+    const generated = await scanAndGeneratePlans(projectRoot, watchDir, testPlansDir, projectContext);
     result.generatedPlans = generated;
 
     if (generated.length === 0) {
@@ -176,6 +178,7 @@ export async function scanAndGeneratePlans(
   projectRoot: string,
   watchDir: string,
   testPlansDir: string,
+  projectContext?: ProjectContext,
 ): Promise<GeneratedPlanInfo[]> {
   const fullWatchDir = path.resolve(projectRoot, watchDir);
   const results: GeneratedPlanInfo[] = [];
@@ -203,7 +206,10 @@ export async function scanAndGeneratePlans(
       continue;
     }
 
-    const plan = await generatePlanFromFile(fullPath);
+    const plan = await generatePlanFromFile(fullPath, {
+      projectRoot,
+      projectContext,
+    });
     if (plan) {
       const savedPath = await savePlan(plan, testPlansDir);
       const relativePlanPath = path.relative(projectRoot, savedPath);

@@ -9,7 +9,14 @@ import {
   buildSteps,
   generatePlanFromFile,
   savePlan,
+  extractTextContent,
+  detectComponentLibraryElements,
+  disambiguateSelectors,
+  inferRouteFromFilePath,
+  sniffProjectDeps,
+  clearProjectContextCache,
 } from '../plan-generator.js';
+import type { DetectedElement } from '@popcorn/shared';
 
 describe('extractAttr', () => {
   it('extracts double-quoted attribute', () => {
@@ -601,5 +608,465 @@ describe('savePlan', () => {
 
     const files = await fs.readdir(plansDir);
     expect(files).toContain('new.json');
+  });
+});
+
+// ====================================================================
+// New tests: text content extraction, component libraries, disambiguation,
+// route inference, project context sniffing
+// ====================================================================
+
+describe('extractTextContent', () => {
+  it('extracts text content from button elements', () => {
+    const src = '<button type="submit">Submit Order</button>';
+    expect(extractTextContent(src, 0, 'button')).toBe('Submit Order');
+  });
+
+  it('extracts text content from link elements', () => {
+    const src = '<a href="/about">About Us</a>';
+    expect(extractTextContent(src, 0, 'a')).toBe('About Us');
+  });
+
+  it('strips nested JSX tags from text', () => {
+    const src = '<button><Icon /> Submit</button>';
+    expect(extractTextContent(src, 0, 'button')).toBe('Submit');
+  });
+
+  it('returns null for dynamic-only content', () => {
+    const src = '<button>{buttonText}</button>';
+    expect(extractTextContent(src, 0, 'button')).toBeNull();
+  });
+
+  it('returns null for self-closing tags', () => {
+    const src = '<input name="x" />';
+    expect(extractTextContent(src, 0, 'input')).toBeNull();
+  });
+
+  it('returns null when no closing tag found', () => {
+    const src = '<button>Text without closing';
+    expect(extractTextContent(src, 0, 'button')).toBeNull();
+  });
+
+  it('handles mixed static text and expressions', () => {
+    const src = '<button>Save {count} Items</button>';
+    expect(extractTextContent(src, 0, 'button')).toBe('Save Items');
+  });
+
+  it('handles multiline text content', () => {
+    const src = '<button>\n  Submit\n  Order\n</button>';
+    expect(extractTextContent(src, 0, 'button')).toBe('Submit Order');
+  });
+});
+
+describe('detectElements — text content extraction', () => {
+  it('populates label on button elements', () => {
+    const elements = detectElements('<button type="submit">Submit Order</button>');
+    const btn = elements.find((e) => e.type === 'button');
+    expect(btn?.label).toBe('Submit Order');
+  });
+
+  it('populates label on link elements', () => {
+    const elements = detectElements('<a href="/about">About Us</a>');
+    const link = elements.find((e) => e.type === 'link');
+    expect(link?.label).toBe('About Us');
+  });
+
+  it('uses aria-label as fallback for buttons', () => {
+    const elements = detectElements('<button aria-label="Close dialog">{icon}</button>');
+    const btn = elements.find((e) => e.type === 'button');
+    expect(btn?.label).toBe('Close dialog');
+  });
+
+  it('uses aria-label as fallback for links', () => {
+    const elements = detectElements('<a href="/home" aria-label="Go home">{icon}</a>');
+    const link = elements.find((e) => e.type === 'link');
+    expect(link?.label).toBe('Go home');
+  });
+});
+
+describe('detectElements — component library detection', () => {
+  it('detects MUI TextField as input', () => {
+    const src = `import { TextField } from '@mui/material';\n<TextField name="email" label="Email" />`;
+    const elements = detectElements(src);
+    expect(elements.some((e) => e.type === 'input' && e.name === 'email')).toBe(true);
+  });
+
+  it('detects MUI Button as button with label', () => {
+    const src = `import { Button } from '@mui/material';\n<Button variant="contained">Save Changes</Button>`;
+    const elements = detectElements(src);
+    const btn = elements.find((e) => e.type === 'button');
+    expect(btn).toBeDefined();
+    expect(btn?.label).toBe('Save Changes');
+  });
+
+  it('detects Chakra UI components', () => {
+    const src = `import { Input, Button } from '@chakra-ui/react';\n<Input name="search" />\n<Button>Search</Button>`;
+    const elements = detectElements(src);
+    expect(elements.some((e) => e.type === 'input' && e.name === 'search')).toBe(true);
+    expect(elements.some((e) => e.type === 'button' && e.label === 'Search')).toBe(true);
+  });
+
+  it('detects Ant Design components', () => {
+    const src = `import { Form, Input, Button } from 'antd';\n<Form>\n<Input name="user" />\n<Button>Save</Button>\n</Form>`;
+    const elements = detectElements(src);
+    expect(elements.some((e) => e.type === 'form')).toBe(true);
+    expect(elements.some((e) => e.type === 'input')).toBe(true);
+    expect(elements.some((e) => e.type === 'button')).toBe(true);
+  });
+
+  it('detects Radix namespace imports (Dialog.Trigger)', () => {
+    const src = `import * as Dialog from '@radix-ui/react-dialog';\n<Dialog.Trigger>Open</Dialog.Trigger>`;
+    const elements = detectElements(src);
+    expect(elements.some((e) => e.type === 'button' && e.label === 'Open')).toBe(true);
+  });
+
+  it('detects Headless UI components', () => {
+    const src = `import { Listbox, Button } from '@headlessui/react';\n<Listbox name="options" />\n<Button>Apply</Button>`;
+    const elements = detectElements(src);
+    expect(elements.some((e) => e.type === 'select')).toBe(true);
+    expect(elements.some((e) => e.type === 'button')).toBe(true);
+  });
+
+  it('does not detect components from unknown libraries', () => {
+    const src = `import { CustomInput } from 'my-lib';\n<CustomInput name="x" />`;
+    const elements = detectElements(src);
+    expect(elements).toHaveLength(0);
+  });
+
+  it('does not detect imported but unused components', () => {
+    const src = `import { Button, TextField } from '@mui/material';\nconst x = 42;`;
+    const elements = detectElements(src);
+    expect(elements).toHaveLength(0);
+  });
+
+  it('handles aliased imports', () => {
+    const src = `import { Button as Btn } from '@mui/material';\n<Btn>Click Me</Btn>`;
+    const elements = detectElements(src);
+    expect(elements.some((e) => e.type === 'button' && e.label === 'Click Me')).toBe(true);
+  });
+
+  it('uses data-testid from component library elements', () => {
+    const src = `import { Button } from '@mui/material';\n<Button data-testid="submit-btn">Submit</Button>`;
+    const elements = detectElements(src);
+    const btn = elements.find((e) => e.type === 'button');
+    expect(btn?.selector).toBe('[data-testid="submit-btn"]');
+  });
+
+  it('does not duplicate elements detected by both HTML and library detection', () => {
+    // MUI Button renders as <button> but we import Button — should not get two entries
+    const src = `import { Button } from '@mui/material';\n<Button>Save</Button>`;
+    const elements = detectElements(src);
+    const buttons = elements.filter((e) => e.type === 'button');
+    expect(buttons).toHaveLength(1);
+  });
+});
+
+describe('detectElements — data-testid and aria-label', () => {
+  it('uses data-testid for button selector', () => {
+    const elements = detectElements('<button data-testid="save-btn">Save</button>');
+    expect(elements[0].selector).toBe('[data-testid="save-btn"]');
+  });
+
+  it('uses data-testid for input selector', () => {
+    const elements = detectElements('<input data-testid="email-input" name="email" type="email" />');
+    expect(elements[0].selector).toBe('[data-testid="email-input"]');
+  });
+
+  it('prefers data-testid over id', () => {
+    const elements = detectElements('<button id="btn" data-testid="test-btn">Go</button>');
+    expect(elements[0].selector).toBe('[data-testid="test-btn"]');
+  });
+});
+
+describe('disambiguateSelectors', () => {
+  it('disambiguates two buttons without IDs using nth-of-type', () => {
+    const elements: DetectedElement[] = [
+      { type: 'button', selector: 'button', label: 'Save' },
+      { type: 'button', selector: 'button', label: 'Cancel' },
+    ];
+    const result = disambiguateSelectors(elements, '');
+    expect(result[0].selector).toBe('button:nth-of-type(1)');
+    expect(result[1].selector).toBe('button:nth-of-type(2)');
+  });
+
+  it('does not disambiguate elements with unique selectors', () => {
+    const elements: DetectedElement[] = [
+      { type: 'button', selector: '#save', label: 'Save' },
+      { type: 'button', selector: '#cancel', label: 'Cancel' },
+    ];
+    const result = disambiguateSelectors(elements, '');
+    expect(result[0].selector).toBe('#save');
+    expect(result[1].selector).toBe('#cancel');
+  });
+
+  it('does not disambiguate data-testid selectors', () => {
+    const elements: DetectedElement[] = [
+      { type: 'button', selector: '[data-testid="a"]' },
+      { type: 'button', selector: '[data-testid="b"]' },
+    ];
+    const result = disambiguateSelectors(elements, '');
+    expect(result[0].selector).toBe('[data-testid="a"]');
+    expect(result[1].selector).toBe('[data-testid="b"]');
+  });
+
+  it('only disambiguates duplicate selectors, leaves unique ones alone', () => {
+    const elements: DetectedElement[] = [
+      { type: 'button', selector: 'button', label: 'A' },
+      { type: 'button', selector: 'button', label: 'B' },
+      { type: 'button', selector: '#unique', label: 'C' },
+    ];
+    const result = disambiguateSelectors(elements, '');
+    expect(result[0].selector).toBe('button:nth-of-type(1)');
+    expect(result[1].selector).toBe('button:nth-of-type(2)');
+    expect(result[2].selector).toBe('#unique');
+  });
+});
+
+describe('inferRouteFromFilePath', () => {
+  it('infers /login for pages/login.tsx (Next.js Pages)', () => {
+    expect(inferRouteFromFilePath('/project/pages/login.tsx', '/project', 'nextjs')).toBe('/login');
+  });
+
+  it('infers / for pages/index.tsx', () => {
+    expect(inferRouteFromFilePath('/project/pages/index.tsx', '/project', 'nextjs')).toBe('/');
+  });
+
+  it('infers /auth/signup for nested pages', () => {
+    expect(inferRouteFromFilePath('/project/pages/auth/signup.tsx', '/project', 'nextjs')).toBe('/auth/signup');
+  });
+
+  it('infers /dashboard for app/dashboard/page.tsx (Next.js App Router)', () => {
+    expect(inferRouteFromFilePath('/project/app/dashboard/page.tsx', '/project', 'nextjs')).toBe('/dashboard');
+  });
+
+  it('strips route groups from App Router paths', () => {
+    expect(inferRouteFromFilePath('/project/app/(auth)/login/page.tsx', '/project', 'nextjs')).toBe('/login');
+  });
+
+  it('handles src/pages and src/app prefixes', () => {
+    expect(inferRouteFromFilePath('/project/src/pages/about.tsx', '/project', 'nextjs')).toBe('/about');
+    expect(inferRouteFromFilePath('/project/src/app/settings/page.tsx', '/project', 'nextjs')).toBe('/settings');
+  });
+
+  it('skips _app and _document files', () => {
+    expect(inferRouteFromFilePath('/project/pages/_app.tsx', '/project', 'nextjs')).toBeNull();
+    expect(inferRouteFromFilePath('/project/pages/_document.tsx', '/project', 'nextjs')).toBeNull();
+  });
+
+  it('skips API routes', () => {
+    expect(inferRouteFromFilePath('/project/pages/api/users.ts', '/project', 'nextjs')).toBeNull();
+  });
+
+  it('infers Remix routes with dot notation', () => {
+    expect(inferRouteFromFilePath('/project/app/routes/auth.signup.tsx', '/project', 'remix')).toBe('/auth/signup');
+  });
+
+  it('infers Remix _index route', () => {
+    expect(inferRouteFromFilePath('/project/app/routes/_index.tsx', '/project', 'remix')).toBe('/');
+  });
+
+  it('infers Astro page routes', () => {
+    expect(inferRouteFromFilePath('/project/src/pages/about.astro', '/project', 'astro')).toBe('/about');
+  });
+
+  it('returns null for non-routing files', () => {
+    expect(inferRouteFromFilePath('/project/src/components/Button.tsx', '/project', 'nextjs')).toBeNull();
+    expect(inferRouteFromFilePath('/project/src/utils/helpers.ts', '/project', null)).toBeNull();
+  });
+
+  it('works with null framework (tries all conventions)', () => {
+    expect(inferRouteFromFilePath('/project/pages/login.tsx', '/project', null)).toBe('/login');
+    expect(inferRouteFromFilePath('/project/app/routes/login.tsx', '/project', null)).toBe('/login');
+  });
+});
+
+describe('sniffProjectDeps', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'popcorn-sniff-'));
+    clearProjectContextCache();
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+    clearProjectContextCache();
+  });
+
+  it('detects Next.js framework', async () => {
+    await fs.writeFile(path.join(tmpDir, 'package.json'), JSON.stringify({
+      dependencies: { next: '14.0.0', react: '18.0.0' },
+    }));
+    const ctx = await sniffProjectDeps(tmpDir);
+    expect(ctx.framework).toBe('nextjs');
+  });
+
+  it('detects Remix framework', async () => {
+    await fs.writeFile(path.join(tmpDir, 'package.json'), JSON.stringify({
+      dependencies: { '@remix-run/react': '2.0.0' },
+    }));
+    const ctx = await sniffProjectDeps(tmpDir);
+    expect(ctx.framework).toBe('remix');
+  });
+
+  it('detects Astro framework', async () => {
+    await fs.writeFile(path.join(tmpDir, 'package.json'), JSON.stringify({
+      dependencies: { astro: '4.0.0' },
+    }));
+    const ctx = await sniffProjectDeps(tmpDir);
+    expect(ctx.framework).toBe('astro');
+  });
+
+  it('detects MUI library', async () => {
+    await fs.writeFile(path.join(tmpDir, 'package.json'), JSON.stringify({
+      dependencies: { '@mui/material': '5.0.0', react: '18.0.0' },
+    }));
+    const ctx = await sniffProjectDeps(tmpDir);
+    expect(ctx.uiLibraries).toContain('@mui/material');
+  });
+
+  it('detects Chakra UI library', async () => {
+    await fs.writeFile(path.join(tmpDir, 'package.json'), JSON.stringify({
+      dependencies: { '@chakra-ui/react': '2.0.0' },
+    }));
+    const ctx = await sniffProjectDeps(tmpDir);
+    expect(ctx.uiLibraries).toContain('@chakra-ui/react');
+  });
+
+  it('detects TypeScript', async () => {
+    await fs.writeFile(path.join(tmpDir, 'package.json'), JSON.stringify({
+      devDependencies: { typescript: '5.0.0' },
+    }));
+    const ctx = await sniffProjectDeps(tmpDir);
+    expect(ctx.typescript).toBe(true);
+  });
+
+  it('returns null framework when none detected', async () => {
+    await fs.writeFile(path.join(tmpDir, 'package.json'), JSON.stringify({
+      dependencies: { react: '18.0.0' },
+    }));
+    const ctx = await sniffProjectDeps(tmpDir);
+    expect(ctx.framework).toBeNull();
+  });
+
+  it('returns defaults when no package.json', async () => {
+    const ctx = await sniffProjectDeps(tmpDir);
+    expect(ctx.framework).toBeNull();
+    expect(ctx.uiLibraries).toHaveLength(0);
+    expect(ctx.typescript).toBe(false);
+  });
+
+  it('caches results per project root', async () => {
+    await fs.writeFile(path.join(tmpDir, 'package.json'), JSON.stringify({
+      dependencies: { next: '14.0.0' },
+    }));
+    const ctx1 = await sniffProjectDeps(tmpDir);
+    const ctx2 = await sniffProjectDeps(tmpDir);
+    expect(ctx1).toBe(ctx2); // same reference — cached
+  });
+});
+
+describe('generatePlanFromFile — route inference', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'popcorn-route-'));
+    clearProjectContextCache();
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+    clearProjectContextCache();
+  });
+
+  it('infers route for Next.js Pages Router file', async () => {
+    await fs.writeFile(path.join(tmpDir, 'package.json'), JSON.stringify({
+      dependencies: { next: '14.0.0', react: '18.0.0' },
+    }));
+    await fs.mkdir(path.join(tmpDir, 'pages'), { recursive: true });
+    const src = '<form><input name="email" type="email" /><button type="submit">Login</button></form>';
+    const filePath = path.join(tmpDir, 'pages', 'login.tsx');
+    await fs.writeFile(filePath, src);
+
+    const plan = await generatePlanFromFile(filePath, {
+      baseUrl: 'http://localhost:3000',
+      projectRoot: tmpDir,
+    });
+    expect(plan).not.toBeNull();
+    expect(plan!.steps[0].target).toBe('http://localhost:3000/login');
+  });
+
+  it('infers route for Next.js App Router file', async () => {
+    await fs.writeFile(path.join(tmpDir, 'package.json'), JSON.stringify({
+      dependencies: { next: '14.0.0', react: '18.0.0' },
+    }));
+    await fs.mkdir(path.join(tmpDir, 'app', 'dashboard'), { recursive: true });
+    const src = '<form><input name="search" /><button>Search</button></form>';
+    const filePath = path.join(tmpDir, 'app', 'dashboard', 'page.tsx');
+    await fs.writeFile(filePath, src);
+
+    const plan = await generatePlanFromFile(filePath, {
+      baseUrl: 'http://localhost:3000',
+      projectRoot: tmpDir,
+    });
+    expect(plan).not.toBeNull();
+    expect(plan!.steps[0].target).toBe('http://localhost:3000/dashboard');
+  });
+
+  it('uses default baseUrl when no route is inferred', async () => {
+    const src = '<form><input name="x" /><button>Go</button></form>';
+    const filePath = path.join(tmpDir, 'Form.tsx');
+    await fs.writeFile(filePath, src);
+
+    const plan = await generatePlanFromFile(filePath, {
+      baseUrl: 'http://localhost:3000',
+      projectRoot: tmpDir,
+    });
+    expect(plan!.steps[0].target).toBe('http://localhost:3000');
+  });
+});
+
+describe('generatePlanFromFile — component library integration', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'popcorn-lib-'));
+    clearProjectContextCache();
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+    clearProjectContextCache();
+  });
+
+  it('generates plan for MUI form component', async () => {
+    await fs.writeFile(path.join(tmpDir, 'package.json'), JSON.stringify({
+      dependencies: { '@mui/material': '5.0.0', react: '18.0.0' },
+    }));
+    const src = `
+import { TextField, Button } from '@mui/material';
+export function LoginForm() {
+  return (
+    <form>
+      <TextField name="email" label="Email" />
+      <TextField name="password" label="Password" type="password" />
+      <Button type="submit">Sign In</Button>
+    </form>
+  );
+}`;
+    const filePath = path.join(tmpDir, 'LoginForm.tsx');
+    await fs.writeFile(filePath, src);
+
+    const plan = await generatePlanFromFile(filePath, { projectRoot: tmpDir });
+    expect(plan).not.toBeNull();
+    expect(plan!.tags).toContain('auto-generated');
+
+    const actions = plan!.steps.map((s) => s.action);
+    expect(actions).toContain('fill');
+    expect(actions).toContain('click');
+
+    // Should have fill steps for both fields
+    const fillSteps = plan!.steps.filter((s) => s.action === 'fill');
+    expect(fillSteps.length).toBeGreaterThanOrEqual(2);
   });
 });
