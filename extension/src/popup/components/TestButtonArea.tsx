@@ -19,7 +19,7 @@ export function TestButtonArea({ onClick, onPlansClick }: TestButtonAreaProps) {
         <svg width="14" height="16" viewBox="0 0 10 12" fill="none" xmlns="http://www.w3.org/2000/svg">
           <path d="M1 1L9 6L1 11V1Z" fill="currentColor" />
         </svg>
-        Test This Page
+        Test Page
       </button>
       <button
         type="button"
