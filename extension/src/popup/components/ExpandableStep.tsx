@@ -346,7 +346,12 @@ export function ExpandableStep({
   const hasConsoleLogs = step.consoleLogs && step.consoleLogs.length > 0;
 
   // Determine expandable content
-  const hasMetadata = metadata && Object.keys(metadata).some((k) => !INTERNAL_KEYS.has(k));
+  const hasMetadata = metadata && Object.keys(metadata).some((k) => {
+    if (INTERNAL_KEYS.has(k)) return false;
+    // "actionable: true" on a passing check_actionability is redundant with the pass icon
+    if (step.action === 'check_actionability' && step.passed && k === 'actionable' && metadata[k] === true) return false;
+    return true;
+  });
   const hasTestStepInput = !step.passed && testStep && (testStep.selector || testStep.target || testStep.expected !== undefined);
   const hasExpandableContent = hasMetadata || hasConsoleLogs || step.error || step.screenshotDataUrl || hasTestStepInput;
 
