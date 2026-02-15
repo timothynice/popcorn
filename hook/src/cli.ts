@@ -7,6 +7,9 @@
  *   npx popcorn --help     Show usage
  */
 
+import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
 import { runInit } from './commands/init.js';
 import { runServe } from './commands/serve.js';
 
@@ -47,6 +50,10 @@ async function main(): Promise<void> {
     }
 
     console.log(`\nWatch directory: ${result.watchDir}`);
+
+    // Auto-start the bridge server as a background process
+    const started = await startServeDaemon(projectRoot);
+
     console.log('\nNext steps:');
     console.log('  1. Edit popcorn.config.json if the detected watchDir is wrong');
     if (result.generatedPlans.length > 0) {
@@ -55,13 +62,13 @@ async function main(): Promise<void> {
       console.log('  2. Create test plans in test-plans/ (or let Popcorn auto-generate them)');
     }
     console.log('  3. Install the Popcorn Chrome extension (load extension/dist/ unpacked)');
-    console.log('  4. Run `popcorn serve` to start the bridge server');
-    console.log('  5. Open your app in Chrome and keep its tab active');
-    console.log('  6. Edit a file in your watch directory to trigger a demo');
-    console.log('');
-    console.log('  Tip: Run `popcorn serve` in a terminal to keep the bridge server');
-    console.log('  running. This lets the Chrome extension show your test plans and');
-    console.log('  stay connected between demo runs.');
+    console.log('  4. Open your app in Chrome and keep its tab active');
+    console.log('  5. Edit a file in your watch directory to trigger a demo');
+    if (!started) {
+      console.log('');
+      console.log('  Note: Could not auto-start bridge server. Run `popcorn serve`');
+      console.log('  manually to let the Chrome extension discover your test plans.');
+    }
   } else if (command === 'serve') {
     const projectRoot = process.cwd();
     await runServe(projectRoot);
@@ -73,6 +80,30 @@ async function main(): Promise<void> {
     if (command && command !== '--help' && command !== '-h') {
       process.exit(1);
     }
+  }
+}
+
+/**
+ * Spawns `popcorn serve` as a detached background process.
+ * Returns true if the daemon started successfully.
+ */
+async function startServeDaemon(projectRoot: string): Promise<boolean> {
+  try {
+    const thisFile = fileURLToPath(import.meta.url);
+    const cliPath = path.resolve(path.dirname(thisFile), 'cli.js');
+
+    const child = spawn(process.execPath, [cliPath, 'serve'], {
+      cwd: projectRoot,
+      detached: true,
+      stdio: 'ignore',
+    });
+
+    child.unref();
+    console.log(`\nBridge server started (pid ${child.pid}).`);
+    console.log('The Chrome extension can now discover your test plans.');
+    return true;
+  } catch {
+    return false;
   }
 }
 
