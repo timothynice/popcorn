@@ -25,6 +25,9 @@ export function PlansPanel({ onBack, hookConnected, onRunPlan }: PlansPanelProps
         .then((response) => {
           if (response?.success && response.plans) {
             setPlans(response.plans);
+            if (response.plans.length > 0) {
+              handleSelectPlan(response.plans[0]);
+            }
           } else {
             setListError(response?.error || 'Failed to load plans');
           }
