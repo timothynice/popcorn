@@ -40,14 +40,21 @@ export function ExpandableStep({ step, onScreenshotClick }: ExpandableStepProps)
   const [expanded, setExpanded] = useState(false);
 
   const metadata = step.metadata;
-  const hasMetadata = metadata && Object.keys(metadata).length > 0;
   const hasConsoleLogs = step.consoleLogs && step.consoleLogs.length > 0;
-  const hasExpandableContent = hasMetadata || hasConsoleLogs || step.error || step.screenshotDataUrl;
 
-  // Filter out internal metadata keys
+  // Filter out internal and trivially obvious metadata keys
   const metadataEntries = metadata
-    ? Object.entries(metadata).filter(([key]) => key !== 'screenshotDataUrl' && key !== 'needsBackgroundScreenshot')
+    ? Object.entries(metadata).filter(([key, value]) => {
+        // Always hide internal keys
+        if (key === 'screenshotDataUrl' || key === 'needsBackgroundScreenshot') return false;
+        // Hide "actionable: true" on check_actionability steps — it's redundant with the step title
+        if (step.action === 'check_actionability' && key === 'actionable' && value === true) return false;
+        return true;
+      })
     : [];
+
+  const hasMeaningfulMetadata = metadataEntries.length > 0;
+  const hasExpandableContent = hasMeaningfulMetadata || hasConsoleLogs || step.error || step.screenshotDataUrl;
 
   const handleToggle = () => {
     if (hasExpandableContent) setExpanded(!expanded);
