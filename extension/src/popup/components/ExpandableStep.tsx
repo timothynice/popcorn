@@ -63,7 +63,7 @@ export function ExpandableStep({ step, onScreenshotClick }: ExpandableStepProps)
     : undefined;
 
   return (
-    <div className={`${styles.step} ${step.passed ? styles.stepPassed : styles.stepFailed}`}>
+    <div className={`${styles.step} ${step.passed ? styles.stepPassed : styles.stepFailed} ${hasExpandableContent ? styles.expandable : ''}`}>
       <div
         className={`${styles.clickArea} ${hasExpandableContent ? styles.clickAreaExpandable : ''}`}
         onClick={handleToggle}

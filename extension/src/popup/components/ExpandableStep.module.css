@@ -13,6 +13,16 @@
   border-left: 3px solid var(--accent-red);
 }
 
+.stepPassed.expandable {
+  border-color: var(--accent-green);
+  border-left-width: 3px;
+}
+
+.stepFailed.expandable {
+  border-color: var(--accent-red);
+  border-left-width: 3px;
+}
+
 .clickArea {
   display: flex;
   align-items: center;
