@@ -49,19 +49,27 @@ export function ExpandableStep({ step, onScreenshotClick }: ExpandableStepProps)
     ? Object.entries(metadata).filter(([key]) => key !== 'screenshotDataUrl' && key !== 'needsBackgroundScreenshot')
     : [];
 
+  const handleToggle = () => {
+    if (hasExpandableContent) setExpanded(!expanded);
+  };
+
+  const handleKeyDown = hasExpandableContent
+    ? (e: React.KeyboardEvent) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          setExpanded(!expanded);
+        }
+      }
+    : undefined;
+
   return (
     <div className={`${styles.step} ${step.passed ? styles.stepPassed : styles.stepFailed}`}>
       <div
-        className={`${styles.header} ${hasExpandableContent ? styles.headerExpandable : ''}`}
-        onClick={() => hasExpandableContent && setExpanded(!expanded)}
+        className={`${styles.clickArea} ${hasExpandableContent ? styles.clickAreaExpandable : ''}`}
+        onClick={handleToggle}
         role={hasExpandableContent ? 'button' : undefined}
         tabIndex={hasExpandableContent ? 0 : undefined}
-        onKeyDown={hasExpandableContent ? (e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            setExpanded(!expanded);
-          }
-        } : undefined}
+        onKeyDown={handleKeyDown}
         aria-expanded={hasExpandableContent ? expanded : undefined}
       >
         {hasExpandableContent && (
@@ -69,19 +77,21 @@ export function ExpandableStep({ step, onScreenshotClick }: ExpandableStepProps)
             {'\u25B6'}
           </span>
         )}
-        <span className={styles.stepIcon}>
-          {step.passed ? '\u2713' : '\u2717'}
-        </span>
-        <span className={styles.stepNumber}>Step {step.stepNumber}</span>
-        <span className={styles.stepAction}>{step.action}</span>
-        <span className={styles.stepDuration}>{formatDuration(step.duration)}</span>
+        <div className={styles.body}>
+          <div className={styles.header}>
+            <span className={styles.stepIcon}>
+              {step.passed ? '\u2713' : '\u2717'}
+            </span>
+            <span className={styles.stepNumber}>Step {step.stepNumber}</span>
+            <span className={styles.stepAction}>{step.action}</span>
+            <span className={styles.stepDuration}>{formatDuration(step.duration)}</span>
+          </div>
+          <p className={styles.description}>{step.description}</p>
+          {!expanded && step.error && (
+            <div className={styles.errorCompact}>{step.error}</div>
+          )}
+        </div>
       </div>
-
-      <p className={styles.description}>{step.description}</p>
-
-      {!expanded && step.error && (
-        <div className={styles.errorCompact}>{step.error}</div>
-      )}
 
       {expanded && (
         <div className={styles.detail}>

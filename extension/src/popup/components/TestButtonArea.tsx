@@ -34,7 +34,7 @@ export function TestButtonArea({ onClick, onPlansClick }: TestButtonAreaProps) {
           <line x1="5" y1="8" x2="11" y2="8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
           <line x1="5" y1="11" x2="9" y2="11" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
         </svg>
-        Plans
+        Test Plans
       </button>
     </div>
   );

@@ -6,7 +6,8 @@
 }
 
 .header {
-  padding: 8px 12px;
+  height: 44px;
+  padding: 0 12px;
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border-color);
   display: flex;
