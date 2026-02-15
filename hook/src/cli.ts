@@ -8,6 +8,7 @@
  */
 
 import { runInit } from './commands/init.js';
+import { runServe } from './commands/serve.js';
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -54,16 +55,21 @@ async function main(): Promise<void> {
       console.log('  2. Create test plans in test-plans/ (or let Popcorn auto-generate them)');
     }
     console.log('  3. Install the Popcorn Chrome extension (load extension/dist/ unpacked)');
-    console.log('  4. Open your app in Chrome and keep its tab active');
-    console.log('  5. Edit a file in your watch directory to trigger a demo');
+    console.log('  4. Run `popcorn serve` to start the bridge server');
+    console.log('  5. Open your app in Chrome and keep its tab active');
+    console.log('  6. Edit a file in your watch directory to trigger a demo');
     console.log('');
-    console.log('  Tip: Popcorn runs demos on the active Chrome tab. Make sure your');
-    console.log('  app is open before triggering. If you want Popcorn to navigate');
-    console.log('  automatically, set "baseUrl" in popcorn.config.json (e.g. "http://localhost:3000").');
+    console.log('  Tip: Run `popcorn serve` in a terminal to keep the bridge server');
+    console.log('  running. This lets the Chrome extension show your test plans and');
+    console.log('  stay connected between demo runs.');
+  } else if (command === 'serve') {
+    const projectRoot = process.cwd();
+    await runServe(projectRoot);
   } else {
     console.log('Usage: popcorn <command>\n');
     console.log('Commands:');
-    console.log('  init    Scaffold Popcorn for this project');
+    console.log('  init     Scaffold Popcorn for this project');
+    console.log('  serve    Start persistent bridge server for Chrome extension');
     if (command && command !== '--help' && command !== '-h') {
       process.exit(1);
     }

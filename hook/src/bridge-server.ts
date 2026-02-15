@@ -158,6 +158,8 @@ export class BridgeServer {
       this.handleGetConfig(req, res);
     } else if (url === '/config' && req.method === 'POST') {
       this.handleSetConfig(req, res);
+    } else if (url === '/demo' && req.method === 'POST') {
+      this.handlePostDemo(req, res);
     } else if (url === '/plans' && req.method === 'GET') {
       this.handleGetPlans(req, res);
     } else if (url.startsWith('/plans/') && req.method === 'GET') {
@@ -253,6 +255,36 @@ export class BridgeServer {
       })
       .catch(() => {
         this.json(res, 500, { ok: false, error: 'Failed to save config' });
+      });
+  }
+
+  /** POST /demo — accepts a start_demo message and enqueues it. Requires token. */
+  private handlePostDemo(req: http.IncomingMessage, res: http.ServerResponse): void {
+    if (!this.checkToken(req, res)) return;
+
+    this.readBody(req)
+      .then((body) => {
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(body);
+        } catch {
+          this.json(res, 400, { ok: false, error: 'Invalid JSON' });
+          return;
+        }
+
+        const msg = (parsed as Record<string, unknown>).message ?? parsed;
+
+        if (!isPopcornMessage(msg)) {
+          this.json(res, 400, { ok: false, error: 'Invalid PopcornMessage' });
+          return;
+        }
+
+        this.enqueueMessage(msg as PopcornMessage);
+        log.info('Demo enqueued via POST /demo', { type: (msg as PopcornMessage).type });
+        this.json(res, 200, { ok: true });
+      })
+      .catch(() => {
+        this.json(res, 400, { ok: false, error: 'Failed to read request body' });
       });
   }
 

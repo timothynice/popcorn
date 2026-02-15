@@ -26,10 +26,11 @@ import { loadCriteria } from './criteria-loader.js';
 import { ExtensionClient } from './extension-client.js';
 import { createLogger } from './logger.js';
 import {
+  createMessage,
   evaluateAllCriteria,
   parsePlainTextCriteria,
 } from '@popcorn/shared';
-import type { DemoResult } from '@popcorn/shared';
+import type { DemoResult, TestPlan } from '@popcorn/shared';
 
 const log = createLogger('claude-hook');
 
@@ -141,7 +142,21 @@ async function main(): Promise<void> {
     baseUrl: testPlan.baseUrl,
   });
 
-  // Connect to the extension and dispatch the demo
+  // Check if a persistent daemon is already running
+  const daemon = await discoverDaemon();
+
+  if (daemon) {
+    // Route demo through the existing persistent bridge server
+    log.info(`Using existing bridge server on port ${daemon.port}`);
+    try {
+      await dispatchViaDaemon(daemon, testPlan, acceptanceCriteria, filePath);
+    } catch (err) {
+      log.error('Demo dispatch via daemon failed', { error: (err as Error).message });
+    }
+    return;
+  }
+
+  // No daemon running — fall back to ephemeral bridge server
   const client = new ExtensionClient({ projectRoot });
 
   try {
@@ -174,6 +189,71 @@ async function main(): Promise<void> {
   } finally {
     client.disconnect();
   }
+}
+
+interface DaemonInfo {
+  port: number;
+  token: string;
+}
+
+/** Probes ports 7890-7899 for an existing bridge server (e.g. `popcorn serve`). */
+async function discoverDaemon(): Promise<DaemonInfo | null> {
+  for (let port = 7890; port <= 7899; port++) {
+    try {
+      const resp = await fetch(`http://127.0.0.1:${port}/health`, {
+        signal: AbortSignal.timeout(500),
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data.ok && data.token) {
+          return { port, token: data.token };
+        }
+      }
+    } catch {
+      // Port not available
+    }
+  }
+  return null;
+}
+
+/** Sends a start_demo message to an existing bridge server and waits for the result. */
+async function dispatchViaDaemon(
+  daemon: DaemonInfo,
+  testPlan: TestPlan,
+  acceptanceCriteria: string[],
+  triggeredBy: string,
+): Promise<void> {
+  const message = createMessage('start_demo', {
+    testPlanId: testPlan.planName,
+    testPlan,
+    acceptanceCriteria,
+    triggeredBy,
+  });
+
+  // POST the demo message to the daemon's /demo endpoint
+  const resp = await fetch(`http://127.0.0.1:${daemon.port}/demo`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Popcorn-Token': daemon.token,
+    },
+    body: JSON.stringify({ message }),
+    signal: AbortSignal.timeout(5000),
+  });
+
+  if (!resp.ok) {
+    const data = await resp.json().catch(() => ({}));
+    throw new Error(`POST /demo failed: ${(data as Record<string, string>).error || resp.statusText}`);
+  }
+
+  log.info('Demo dispatched to bridge server');
+
+  // Wait for result via polling /result-for/:planId
+  // The daemon enqueues the message for the extension, which will POST result back.
+  // We poll the daemon for the result. For now, we just fire-and-forget since the
+  // daemon handles the full lifecycle. The result will appear in the extension popup.
+  // The hook runner in daemon mode doesn't need to wait for results — the persistent
+  // server handles result collection and the extension UI shows the outcome.
 }
 
 async function findMatchingPlan(
