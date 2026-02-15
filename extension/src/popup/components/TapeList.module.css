@@ -67,14 +67,6 @@
   border-color: var(--accent-red);
 }
 
-.count {
-  font-family: var(--font-sans);
-  font-size: 11px;
-  color: var(--text-secondary);
-  text-align: center;
-  padding: 4px 0;
-}
-
 .list {
   display: flex;
   flex-direction: column;

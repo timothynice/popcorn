@@ -1,4 +1,6 @@
 .area {
+  display: flex;
+  gap: 8px;
   padding: 10px 12px;
   background: var(--bg-secondary);
 }
@@ -8,7 +10,7 @@
   align-items: center;
   justify-content: center;
   gap: 8px;
-  width: 100%;
+  flex: 1;
   padding: 10px 16px;
   border: 1px solid var(--accent-blue);
   border-radius: var(--radius);
@@ -36,5 +38,41 @@
 }
 
 .button svg {
+  flex-shrink: 0;
+}
+
+.plansButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 14px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.plansButton:hover {
+  border-color: var(--text-muted);
+  color: var(--text-primary);
+}
+
+.plansButton:active {
+  filter: brightness(0.95);
+}
+
+.plansButton:focus-visible {
+  outline: 2px solid var(--accent-blue);
+  outline-offset: 2px;
+}
+
+.plansButton svg {
   flex-shrink: 0;
 }

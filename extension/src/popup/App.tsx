@@ -145,7 +145,7 @@ function App() {
     // Feed view (default)
     return (
       <div className={styles.feed}>
-        <TestButtonArea onClick={() => setCurrentView('test')} />
+        <TestButtonArea onClick={() => setCurrentView('test')} onPlansClick={() => setCurrentView('plans')} />
         {status === 'recording' && progressTotal > 0 && (
           <DemoProgress
             currentStep={progressStep}
@@ -188,7 +188,6 @@ function App() {
           error={extensionError}
           hookConnected={hookConnected}
           onSettingsClick={() => setCurrentView('settings')}
-          onPlansClick={() => setCurrentView('plans')}
           showBack={currentView === 'detail'}
           onBack={handleBackToFeed}
         />

@@ -121,15 +121,14 @@ export function TapeList({
           >
             ✗
           </button>
-          {(searchQuery.trim() || filterStatus !== 'all') && (
-            <div className={styles.count}>
-              {filteredTapes.length} of {tapes.length} tapes
-            </div>
-          )}
         </div>
       )}
       <div className={styles.list}>
-        <h3 className={styles.sectionLabel}>Most Recent Test</h3>
+        <h3 className={styles.sectionLabel}>
+          {(searchQuery.trim() || filterStatus !== 'all')
+            ? `${filteredTapes.length} of ${tapes.length} tapes`
+            : 'Most Recent Test'}
+        </h3>
         {filteredTapes.map((tape, index) => (
           <React.Fragment key={tape.id}>
             {index === 1 && filteredTapes.length > 1 && (
