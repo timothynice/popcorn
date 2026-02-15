@@ -217,53 +217,58 @@
   color: var(--accent-red);
 }
 
-/* ---- Export section ---- */
+/* ---- Export row ---- */
 
-.exportSection {
-  padding: 16px;
-  border-bottom: 1px solid var(--border-color);
-}
-
-.exportTitle {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-secondary);
-  margin-bottom: 8px;
-}
-
-.exportButtons {
+.exportRow {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 16px 2px 16px;
 }
 
 .exportButton {
-  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  font-family: var(--font-sans);
   font-size: 11px;
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: var(--radius);
-  color: var(--text-primary);
+  color: var(--text-secondary);
   cursor: pointer;
-  text-align: left;
-  transition: background 0.15s ease;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.exportButton:hover {
+  background: var(--bg-card);
+  color: var(--text-primary);
+}
+
+.exportButton svg {
+  flex-shrink: 0;
+}
+
+.copyButton {
   display: flex;
   align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+  flex-shrink: 0;
 }
 
-.exportButton:hover:not(:disabled) {
+.copyButton:hover {
   background: var(--bg-card);
-}
-
-.exportButton:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.copiedFeedback {
-  color: var(--accent-green);
-  font-size: 11px;
-  margin-left: 8px;
+  color: var(--text-primary);
 }
 
 /* ---- Sections ---- */

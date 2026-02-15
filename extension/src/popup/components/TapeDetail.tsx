@@ -219,27 +219,27 @@ export function TapeDetail({ tape }: TapeDetailProps) {
           <p className={styles.summaryInline}>{tape.summary}</p>
         )}
 
-        {/* 6. Export section */}
-        <div className={styles.exportSection}>
-          <h3 className={styles.exportTitle}>Export</h3>
-          <div className={styles.exportButtons}>
-            <button
-              className={styles.exportButton}
-              onClick={handleExportScreenshots}
-              disabled={!tape.screenshots || tape.screenshots.length === 0}
-            >
-              {'\u2193'} Screenshots ZIP
-            </button>
-            <button className={styles.exportButton} onClick={handleExportJSON}>
-              {'\u2193'} Summary JSON
-            </button>
-            <button className={styles.exportButton} onClick={handleCopySummary}>
-              {'\u{1F4CB}'} Copy Summary
-              {showCopiedFeedback && (
-                <span className={styles.copiedFeedback}>Copied!</span>
-              )}
-            </button>
-          </div>
+        {/* 6. Export row */}
+        <div className={styles.exportRow}>
+          <button className={styles.exportButton} onClick={handleExportJSON}>
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M6 1.5v7M3 6.5l3 3 3-3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M1.5 10.5h9" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+            </svg>
+            Summary JSON
+          </button>
+          <button className={styles.copyButton} onClick={handleCopySummary} title="Copy summary to clipboard">
+            {showCopiedFeedback ? (
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M3.5 7.5l2 2 5-5" stroke="var(--accent-green)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            ) : (
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <rect x="4.5" y="4.5" width="7" height="7" rx="1" stroke="currentColor" strokeWidth="1.2" />
+                <path d="M9.5 4.5V3a1 1 0 00-1-1H3a1 1 0 00-1 1v5.5a1 1 0 001 1h1.5" stroke="currentColor" strokeWidth="1.2" />
+              </svg>
+            )}
+          </button>
         </div>
 
         {/* 7. Steps */}
