@@ -108,8 +108,9 @@ export async function runFullDemo(
 
         const stepStart = Date.now();
         if (step.action === 'navigate' && step.target) {
-          console.log(`[Popcorn] Background navigating to: ${step.target}`);
-          await navigateTab(tabId, step.target);
+          const resolvedTarget = resolveNavigateTarget(step.target, deps.originalUrl);
+          console.log(`[Popcorn] Background navigating to: ${resolvedTarget}`);
+          await navigateTab(tabId, resolvedTarget);
         } else if (step.action === 'go_back') {
           console.log('[Popcorn] Background going back via browser history');
           await goBackTab(tabId);
@@ -452,6 +453,25 @@ export function groupStepRounds(steps: TestStep[]): StepRound[] {
 }
 
 /**
+ * Resolves a potentially relative navigate target against the tab's original URL.
+ * e.g. "/" + "http://localhost:8080/page" → "http://localhost:8080/"
+ * Absolute URLs are returned as-is.
+ */
+function resolveNavigateTarget(target: string, originalUrl?: string): string {
+  if (target.startsWith('http://') || target.startsWith('https://')) {
+    return target;
+  }
+  if (originalUrl) {
+    try {
+      return new URL(target, originalUrl).href;
+    } catch {
+      // Fall through
+    }
+  }
+  return target;
+}
+
+/**
  * Navigates a tab to a URL using chrome.tabs.update and waits for the
  * page to finish loading. This is the safe way to navigate — unlike
  * setting window.location in a content script, this doesn't destroy
@@ -694,8 +714,9 @@ export async function runExplorationDemo(
 
   try {
     // 1. Navigate to base URL
-    console.log(`[Popcorn] Exploration: navigating to ${plan.baseUrl}`);
-    await navigateTab(tabId, plan.baseUrl);
+    const resolvedBaseUrl = resolveNavigateTarget(plan.baseUrl, deps.originalUrl);
+    console.log(`[Popcorn] Exploration: navigating to ${resolvedBaseUrl}`);
+    await navigateTab(tabId, resolvedBaseUrl);
     allResults.push(makeStepResult(stepNum++, 'navigate', 'Navigate to page', true));
 
     // 2. Initial screenshot
