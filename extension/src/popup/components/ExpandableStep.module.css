@@ -172,6 +172,17 @@
   white-space: pre-wrap;
 }
 
+/* Section labels (shared across semantic sections) */
+.sectionLabel {
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  margin-bottom: 4px;
+}
+
 /* Metadata grid */
 .metadataSection {
   display: flex;
@@ -215,6 +226,156 @@
 
 .metadataValueFalse {
   color: var(--accent-red);
+}
+
+/* Comparison rows (expected vs actual) */
+.comparisonRow {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px 0;
+}
+
+.comparisonRow + .comparisonRow {
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 6px;
+}
+
+.comparisonLabel {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.comparisonValues {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.expected {
+  color: var(--text-secondary);
+  word-break: break-all;
+}
+
+.actual {
+  color: var(--text-primary);
+  word-break: break-all;
+}
+
+.valueBefore {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  word-break: break-all;
+}
+
+.valueAfter {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-primary);
+  word-break: break-all;
+}
+
+.arrow {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+/* Code values (selectors, CSS) */
+.codeValue {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+  padding: 2px 4px;
+  border-radius: 3px;
+  word-break: break-all;
+}
+
+/* Selector section (failures only) */
+.selectorSection {
+  padding: 8px 10px;
+  background: rgba(196, 85, 77, 0.04);
+  border: 1px solid rgba(196, 85, 77, 0.15);
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.selectorRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.selectorLabel {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  flex-shrink: 0;
+  min-width: 60px;
+  padding-top: 2px;
+}
+
+.selectorValue {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--accent-red);
+  background: rgba(196, 85, 77, 0.06);
+  padding: 2px 4px;
+  border-radius: 3px;
+  word-break: break-all;
+  flex: 1;
+}
+
+/* Copy AI Fix Prompt button */
+.copyPromptButton {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  align-self: flex-start;
+}
+
+.copyPromptButton:hover {
+  background: var(--bg-card);
+  border-color: var(--accent-blue);
+  color: var(--accent-blue);
+}
+
+.copyPromptButton:active {
+  transform: translateY(1px);
+}
+
+.copyPromptButton svg {
+  flex-shrink: 0;
+}
+
+.copyPromptButtonCopied {
+  border-color: var(--accent-green);
+  color: var(--accent-green);
+}
+
+.copyPromptButtonCopied:hover {
+  border-color: var(--accent-green);
+  color: var(--accent-green);
 }
 
 /* Console logs */
@@ -300,5 +461,12 @@
   }
   .errorCompact {
     background: rgba(212, 112, 106, 0.1);
+  }
+  .selectorSection {
+    background: rgba(212, 112, 106, 0.06);
+    border-color: rgba(212, 112, 106, 0.2);
+  }
+  .selectorValue {
+    background: rgba(212, 112, 106, 0.08);
   }
 }

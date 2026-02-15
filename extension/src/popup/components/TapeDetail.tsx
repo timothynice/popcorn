@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import type { TapeRecord } from '@popcorn/shared';
+import type { TapeRecord, TestStep } from '@popcorn/shared';
 import { ExpandableStep } from './ExpandableStep';
 import { Lightbox } from './Lightbox';
 import { downloadAllScreenshotsZip } from '../utils/download';
@@ -246,13 +246,28 @@ export function TapeDetail({ tape }: TapeDetailProps) {
         <section className={styles.section}>
           <h3 className={styles.sectionTitle}>Steps</h3>
           <div className={styles.steps}>
-            {tape.steps.map((step) => (
-              <ExpandableStep
-                key={step.stepNumber}
-                step={step}
-                onScreenshotClick={handleScreenshotClick}
-              />
-            ))}
+            {tape.steps.map((step, index) => {
+              const testStep = tape.testPlan?.steps.find(
+                (s: TestStep) => s.stepNumber === step.stepNumber,
+              );
+              const priorSteps = tape.steps.slice(0, index);
+              const priorStepsContext = {
+                totalBefore: priorSteps.length,
+                passedBefore: priorSteps.filter((s) => s.passed).length,
+                failedBefore: priorSteps.filter((s) => !s.passed).length,
+              };
+
+              return (
+                <ExpandableStep
+                  key={step.stepNumber}
+                  step={step}
+                  testStep={testStep}
+                  testPlanName={tape.testPlanId}
+                  priorStepsContext={priorStepsContext}
+                  onScreenshotClick={handleScreenshotClick}
+                />
+              );
+            })}
           </div>
         </section>
 
