@@ -246,3 +246,46 @@
 .cancelButton:hover {
   background: var(--bg-secondary);
 }
+
+/* ---- Demo Behavior ---- */
+
+.behaviorRow {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.toggleLabel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+.toggleCheckbox {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: var(--accent-blue);
+}
+
+.toggleCheckbox:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.toggleText {
+  user-select: none;
+}
+
+.behaviorHint {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  color: var(--text-muted);
+  margin: 0;
+  line-height: 1.5;
+  padding-left: 24px;
+}

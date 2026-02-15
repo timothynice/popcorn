@@ -173,8 +173,20 @@ export async function generatePlanFromFile(
   const baseName = path.basename(filePath, path.extname(filePath));
   const planName = toKebabCase(baseName);
 
-  // Infer route from file path if projectRoot is available
-  let baseUrl = options?.baseUrl ?? '/';
+  // Infer route from file path if projectRoot is available.
+  // Always store relative paths in auto-generated plans — the hook runner
+  // resolves them against config.baseUrl at runtime (claude-hook-runner.ts:129-137).
+  // Strip any origin from the provided baseUrl so only the path is kept.
+  let baseUrl = '/';
+  if (options?.baseUrl) {
+    try {
+      const parsed = new URL(options.baseUrl);
+      baseUrl = parsed.pathname || '/';
+    } catch {
+      // Already relative — use as-is
+      baseUrl = options.baseUrl;
+    }
+  }
   if (options?.projectRoot) {
     const inferredRoute = inferRouteFromFilePath(
       filePath,
@@ -182,13 +194,7 @@ export async function generatePlanFromFile(
       projectContext?.framework ?? null,
     );
     if (inferredRoute) {
-      // Combine the config baseUrl origin with the inferred route path
-      try {
-        const origin = new URL(baseUrl).origin;
-        baseUrl = `${origin}${inferredRoute}`;
-      } catch {
-        baseUrl = inferredRoute;
-      }
+      baseUrl = inferredRoute;
     }
   }
 

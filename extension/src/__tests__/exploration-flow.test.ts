@@ -66,6 +66,12 @@ const chromeMock = {
     setBadgeBackgroundColor: vi.fn(),
     setTitle: vi.fn(),
   },
+  storage: {
+    local: {
+      get: vi.fn(() => Promise.resolve({})),
+      set: vi.fn(() => Promise.resolve()),
+    },
+  },
 };
 
 vi.stubGlobal('chrome', chromeMock);

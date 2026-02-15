@@ -27,6 +27,8 @@ export interface DemoFlowDeps {
   onTapeSaved?: (tapeId: string) => void;
   /** When true, skip video recording entirely (e.g. hook-triggered demos with no user gesture). */
   skipRecording?: boolean;
+  /** URL the tab was on before the demo started. Used to navigate back after completion. */
+  originalUrl?: string;
 }
 
 /**
@@ -382,13 +384,21 @@ async function saveTapeAndReload(
     );
   }
 
-  // Reset app state by reloading the tab so the next demo starts fresh.
+  // Restore original URL or reload based on user preference.
   try {
-    await reloadTab(tabId);
-    console.log('[Popcorn] Tab reloaded to reset app state');
+    const prefs = await chrome.storage.local.get('popcorn_navigate_back');
+    const shouldNavigateBack = prefs.popcorn_navigate_back !== false;
+
+    if (shouldNavigateBack && deps.originalUrl) {
+      await navigateTab(tabId, deps.originalUrl);
+      console.log(`[Popcorn] Tab navigated back to: ${deps.originalUrl}`);
+    } else {
+      await reloadTab(tabId);
+      console.log('[Popcorn] Tab reloaded to reset app state');
+    }
   } catch (err) {
     console.warn(
-      '[Popcorn] Failed to reload tab after demo:',
+      '[Popcorn] Failed to restore tab after demo:',
       err instanceof Error ? err.message : String(err),
     );
   }

@@ -382,6 +382,7 @@ async function handleStartDemoMessage(
           tapeStore,
           onTapeSaved: notifyTapeSaved,
           skipRecording: message.payload.triggeredBy !== 'popup',
+          originalUrl: currentUrl,
         },
       );
 
@@ -397,6 +398,7 @@ async function handleStartDemoMessage(
       tapeStore,
       onTapeSaved: notifyTapeSaved,
       skipRecording,
+      originalUrl: currentUrl,
     });
 
     updateStatus('complete');

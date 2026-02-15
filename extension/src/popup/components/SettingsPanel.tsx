@@ -22,6 +22,8 @@ export function SettingsPanel({
   const [configError, setConfigError] = useState<string | null>(null);
   const [editingBaseUrl, setEditingBaseUrl] = useState(false);
   const [baseUrlValue, setBaseUrlValue] = useState('');
+  const [navigateBackEnabled, setNavigateBackEnabled] = useState(true);
+  const [loadingNavigateBack, setLoadingNavigateBack] = useState(true);
 
   useEffect(() => {
     chrome.runtime.sendMessage({ type: 'get_tape_count' })
@@ -56,6 +58,19 @@ export function SettingsPanel({
         });
     }
   }, [hookConnected]);
+
+  useEffect(() => {
+    chrome.storage.local.get('popcorn_navigate_back')
+      .then((result) => {
+        setNavigateBackEnabled(result.popcorn_navigate_back !== false);
+      })
+      .catch(() => {
+        setNavigateBackEnabled(true);
+      })
+      .finally(() => {
+        setLoadingNavigateBack(false);
+      });
+  }, []);
 
   const getStatusLabel = () => {
     switch (status) {
@@ -99,6 +114,15 @@ export function SettingsPanel({
   const handleCancelBaseUrl = () => {
     setBaseUrlValue(config?.baseUrl || '');
     setEditingBaseUrl(false);
+  };
+
+  const handleNavigateBackToggle = async (enabled: boolean) => {
+    setNavigateBackEnabled(enabled);
+    try {
+      await chrome.storage.local.set({ popcorn_navigate_back: enabled });
+    } catch {
+      setNavigateBackEnabled(!enabled);
+    }
   };
 
   return (
@@ -199,6 +223,28 @@ export function SettingsPanel({
             >
               {clearing ? 'Clearing...' : 'Clear All Tapes'}
             </button>
+          </div>
+        </section>
+
+        {/* Demo Behavior */}
+        <section className={styles.section}>
+          <h3 className={styles.sectionTitle}>Demo Behavior</h3>
+          <div className={styles.behaviorRow}>
+            <label className={styles.toggleLabel}>
+              <input
+                type="checkbox"
+                className={styles.toggleCheckbox}
+                checked={navigateBackEnabled}
+                disabled={loadingNavigateBack}
+                onChange={(e) => handleNavigateBackToggle(e.target.checked)}
+              />
+              <span className={styles.toggleText}>
+                Return to original page after demo
+              </span>
+            </label>
+            <p className={styles.behaviorHint}>
+              When enabled, the browser navigates back to where you were before the demo started.
+            </p>
           </div>
         </section>
       </div>

@@ -993,7 +993,7 @@ describe('generatePlanFromFile — route inference', () => {
       projectRoot: tmpDir,
     });
     expect(plan).not.toBeNull();
-    expect(plan!.steps[0].target).toBe('http://localhost:3000/login');
+    expect(plan!.steps[0].target).toBe('/login');
   });
 
   it('infers route for Next.js App Router file', async () => {
@@ -1010,7 +1010,7 @@ describe('generatePlanFromFile — route inference', () => {
       projectRoot: tmpDir,
     });
     expect(plan).not.toBeNull();
-    expect(plan!.steps[0].target).toBe('http://localhost:3000/dashboard');
+    expect(plan!.steps[0].target).toBe('/dashboard');
   });
 
   it('uses default baseUrl when no route is inferred', async () => {
@@ -1022,7 +1022,7 @@ describe('generatePlanFromFile — route inference', () => {
       baseUrl: 'http://localhost:3000',
       projectRoot: tmpDir,
     });
-    expect(plan!.steps[0].target).toBe('http://localhost:3000');
+    expect(plan!.steps[0].target).toBe('/');
   });
 });
 

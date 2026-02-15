@@ -53,6 +53,12 @@ const chromeMock = {
     closeDocument: vi.fn(() => Promise.resolve()),
     Reason: { USER_MEDIA: 'USER_MEDIA' },
   },
+  storage: {
+    local: {
+      get: vi.fn(() => Promise.resolve({})),
+      set: vi.fn(() => Promise.resolve()),
+    },
+  },
 };
 
 vi.stubGlobal('chrome', chromeMock);
