@@ -775,9 +775,10 @@ export async function runExplorationDemo(
 
     // 4b. Navigate back to baseUrl for a clean final state
     try {
+      const resolvedBase = resolveNavigateTarget(plan.baseUrl, deps.originalUrl);
       const currentTab = await chrome.tabs.get(tabId);
-      if (currentTab.url !== plan.baseUrl) {
-        await navigateTab(tabId, plan.baseUrl);
+      if (currentTab.url !== resolvedBase) {
+        await navigateTab(tabId, resolvedBase);
         await ensureContentScript(tabId);
       }
     } catch {
