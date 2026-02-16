@@ -136,6 +136,21 @@ async function main(): Promise<void> {
     }
   }
 
+  // Enrich existing plans with route discovery if they don't have one.
+  // This handles cached plans created before the route feature was added.
+  if (!testPlan.route) {
+    try {
+      const { findRouteForComponent } = await import('./import-graph.js');
+      const route = await findRouteForComponent(absFilePath, projectRoot);
+      if (route) {
+        testPlan.route = route;
+        log.info(`Discovered route for '${planName}': ${route}`);
+      }
+    } catch {
+      // Route discovery is best-effort; continue without it
+    }
+  }
+
   log.info(`Dispatching test plan '${planName}'`, {
     triggeredBy: filePath,
     steps: testPlan.steps.length,

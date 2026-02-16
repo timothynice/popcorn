@@ -144,7 +144,8 @@ async function handleFileChange(
 
     const absFilePath = path.resolve(projectRoot, event.relativePath);
     const generatedPlan = await generatePlanFromFile(absFilePath, {
-      baseUrl: '/',
+      baseUrl: config.baseUrl ?? '/',
+      projectRoot,
     });
 
     if (!generatedPlan) {
@@ -162,6 +163,21 @@ async function handleFileChange(
 
     const testPlan = await loadTestPlan(planName, testPlansDir);
     const acceptanceCriteria = await loadCriteria(planName, testPlansDir);
+
+    // Enrich existing plans with route discovery if they don't have one
+    if (!testPlan.route) {
+      try {
+        const absPath = path.resolve(projectRoot, event.relativePath);
+        const { findRouteForComponent } = await import('./import-graph.js');
+        const route = await findRouteForComponent(absPath, projectRoot);
+        if (route) {
+          testPlan.route = route;
+          log.info(`Discovered route for '${planName}': ${route}`);
+        }
+      } catch {
+        // Route discovery is best-effort
+      }
+    }
 
     log.info(`Dispatching test plan '${planName}'`, {
       triggeredBy: event.relativePath,
