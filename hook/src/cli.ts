@@ -11,6 +11,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { runInit } from './commands/init.js';
+import { runClean } from './commands/clean.js';
 import { runServe } from './commands/serve.js';
 
 const args = process.argv.slice(2);
@@ -69,6 +70,26 @@ async function main(): Promise<void> {
       console.log('  Note: Could not auto-start bridge server. Run `popcorn serve`');
       console.log('  manually to let the Chrome extension discover your test plans.');
     }
+  } else if (command === 'clean') {
+    const projectRoot = process.cwd();
+    console.log('Cleaning Popcorn from project...\n');
+
+    const result = await runClean(projectRoot);
+
+    if (result.removed.length > 0) {
+      console.log('Removed:');
+      for (const item of result.removed) {
+        console.log(`  - ${item}`);
+      }
+    }
+    if (result.skipped.length > 0) {
+      console.log('Skipped:');
+      for (const item of result.skipped) {
+        console.log(`  ~ ${item}`);
+      }
+    }
+
+    console.log('\nPopcorn removed. Run `popcorn init` to set up again.');
   } else if (command === 'serve') {
     const projectRoot = process.cwd();
     await runServe(projectRoot);
@@ -76,6 +97,7 @@ async function main(): Promise<void> {
     console.log('Usage: popcorn <command>\n');
     console.log('Commands:');
     console.log('  init     Scaffold Popcorn for this project');
+    console.log('  clean    Remove all Popcorn scaffolding from this project');
     console.log('  serve    Start persistent bridge server for Chrome extension');
     if (command && command !== '--help' && command !== '-h') {
       process.exit(1);
