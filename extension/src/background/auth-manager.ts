@@ -96,6 +96,7 @@ export class AuthManager {
     try {
       const results = await chrome.scripting.executeScript({
         target: { tabId },
+        world: 'MAIN',
         func: detectLoginFormElements,
       });
 
@@ -140,6 +141,7 @@ export class AuthManager {
     try {
       const fillResults = await chrome.scripting.executeScript({
         target: { tabId },
+        world: 'MAIN',
         func: performFillCredentials,
         args: [
           settings.username,
@@ -176,6 +178,7 @@ export class AuthManager {
     try {
       const readyResults = await chrome.scripting.executeScript({
         target: { tabId },
+        world: 'MAIN',
         func: performVerifyFormReady,
         args: [
           loginCheck.usernameSelector,
@@ -207,6 +210,7 @@ export class AuthManager {
     try {
       const clickResults = await chrome.scripting.executeScript({
         target: { tabId },
+        world: 'MAIN',
         func: performClickSubmit,
         args: [loginCheck.submitSelector],
       });
@@ -279,6 +283,7 @@ export class AuthManager {
         try {
           const results = await chrome.scripting.executeScript({
             target: { tabId },
+            world: 'MAIN',
             func: () => !document.querySelector('input[type="password"]'),
           });
           if (results?.[0]?.result) {
