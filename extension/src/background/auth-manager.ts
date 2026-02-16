@@ -219,38 +219,98 @@ export class AuthManager {
 }
 
 // ---- Injected functions (run in page context) ----
+// IMPORTANT: These functions are serialized by chrome.scripting.executeScript
+// and run in the page's isolated context. They CANNOT reference any other
+// functions or variables from this module — all helpers must be inlined.
 
 /**
  * Detects login form elements on the current page.
  * Injected via chrome.scripting.executeScript.
  */
 function detectLoginFormElements(): LoginPageCheck {
+  // -- inline helpers (must be inside injected function) --
+
+  function _buildSelector(el: Element): string {
+    if (el.id) return `#${CSS.escape(el.id)}`;
+
+    const name = el.getAttribute('name');
+    if (name) {
+      const tag = el.tagName.toLowerCase();
+      const type = el.getAttribute('type');
+      const sel = type ? `${tag}[type="${type}"][name="${name}"]` : `${tag}[name="${name}"]`;
+      if (document.querySelectorAll(sel).length === 1) return sel;
+    }
+
+    const type = el.getAttribute('type');
+    const placeholder = el.getAttribute('placeholder');
+    if (type && placeholder) {
+      const sel = `input[type="${type}"][placeholder="${CSS.escape(placeholder)}"]`;
+      if (document.querySelectorAll(sel).length === 1) return sel;
+    }
+
+    if (type && type !== 'text') {
+      const sel = `input[type="${type}"]`;
+      if (document.querySelectorAll(sel).length === 1) return sel;
+    }
+
+    const parent = el.parentElement;
+    if (parent) {
+      const siblings = Array.from(parent.children).filter((c) => c.tagName === el.tagName);
+      const index = siblings.indexOf(el) + 1;
+      return `${el.tagName.toLowerCase()}:nth-of-type(${index})`;
+    }
+    return el.tagName.toLowerCase();
+  }
+
+  function _findUsernameInput(pwInput: HTMLElement): HTMLInputElement | null {
+    const selectors = [
+      'input[type="email"]', 'input[name="email"]', 'input[name="username"]',
+      'input[name="user"]', 'input[autocomplete="email"]', 'input[autocomplete="username"]',
+      'input[id*="email" i]', 'input[id*="user" i]',
+    ];
+    const form = pwInput.closest('form') || document.body;
+    for (const sel of selectors) {
+      const el = form.querySelector(sel) as HTMLInputElement;
+      if (el && el.type !== 'password' && el.type !== 'hidden') return el;
+    }
+    const inputs = form.querySelectorAll('input:not([type="hidden"]):not([type="password"]):not([type="checkbox"]):not([type="radio"]):not([type="submit"])');
+    return inputs.length > 0 ? (inputs[0] as HTMLInputElement) : null;
+  }
+
+  function _findSubmitButton(nearElement: HTMLElement): HTMLElement | null {
+    const form = nearElement.closest('form');
+    const container = form || document.body;
+    const selectors = [
+      'button[type="submit"]', 'input[type="submit"]',
+      'button:not([type="button"]):not([type="reset"])',
+    ];
+    for (const sel of selectors) {
+      const el = container.querySelector(sel) as HTMLElement;
+      if (el) return el;
+    }
+    const buttons = container.querySelectorAll('button, [role="button"]');
+    const loginTerms = /log\s*in|sign\s*in|submit|enter|continue/i;
+    for (const btn of buttons) {
+      if (loginTerms.test(btn.textContent || '')) return btn as HTMLElement;
+    }
+    return null;
+  }
+
+  // -- main logic --
+
   const passwordInput = document.querySelector('input[type="password"]') as HTMLInputElement | null;
 
   if (!passwordInput) {
-    return {
-      isLogin: false,
-      usernameSelector: null,
-      passwordSelector: null,
-      submitSelector: null,
-    };
+    return { isLogin: false, usernameSelector: null, passwordSelector: null, submitSelector: null };
   }
 
-  // Find the password input's unique selector
-  const passwordSelector = buildSelector(passwordInput);
+  const passwordSelector = _buildSelector(passwordInput);
+  const usernameEl = _findUsernameInput(passwordInput);
+  const usernameSelector = usernameEl ? _buildSelector(usernameEl) : null;
+  const submitEl = _findSubmitButton(passwordInput);
+  const submitSelector = submitEl ? _buildSelector(submitEl) : null;
 
-  // Find the username/email input: look for common patterns before the password field
-  const usernameSelector = findUsernameSelector(passwordInput);
-
-  // Find the submit button
-  const submitSelector = findSubmitSelector(passwordInput);
-
-  return {
-    isLogin: true,
-    usernameSelector,
-    passwordSelector,
-    submitSelector,
-  };
+  return { isLogin: true, usernameSelector, passwordSelector, submitSelector };
 }
 
 /**
@@ -264,17 +324,72 @@ function performAutoLogin(
   passwordSel: string | null,
   submitSel: string | null,
 ): { filled: boolean; error?: string } {
+  // -- inline helpers (must be inside injected function) --
+
+  function _fillInput(el: HTMLInputElement, value: string): void {
+    el.focus();
+    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype, 'value',
+    )?.set;
+    if (nativeInputValueSetter) {
+      nativeInputValueSetter.call(el, value);
+    } else {
+      el.value = value;
+    }
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  function _findUsernameInput(): HTMLInputElement | null {
+    const selectors = [
+      'input[type="email"]', 'input[name="email"]', 'input[name="username"]',
+      'input[name="user"]', 'input[autocomplete="email"]', 'input[autocomplete="username"]',
+      'input[id*="email" i]', 'input[id*="user" i]',
+      'input[placeholder*="email" i]', 'input[placeholder*="user" i]',
+    ];
+    for (const sel of selectors) {
+      const el = document.querySelector(sel) as HTMLInputElement;
+      if (el && el.type !== 'password' && el.type !== 'hidden') return el;
+    }
+    const passwordInput = document.querySelector('input[type="password"]');
+    if (passwordInput) {
+      const form = passwordInput.closest('form') || document.body;
+      const inputs = form.querySelectorAll('input:not([type="hidden"]):not([type="password"]):not([type="checkbox"]):not([type="radio"]):not([type="submit"])');
+      if (inputs.length > 0) return inputs[0] as HTMLInputElement;
+    }
+    return null;
+  }
+
+  function _findSubmitButton(nearElement: HTMLElement): HTMLElement | null {
+    const form = nearElement.closest('form');
+    const container = form || document.body;
+    const selectors = [
+      'button[type="submit"]', 'input[type="submit"]',
+      'button:not([type="button"]):not([type="reset"])',
+    ];
+    for (const sel of selectors) {
+      const el = container.querySelector(sel) as HTMLElement;
+      if (el) return el;
+    }
+    const buttons = container.querySelectorAll('button, [role="button"]');
+    const loginTerms = /log\s*in|sign\s*in|submit|enter|continue/i;
+    for (const btn of buttons) {
+      if (loginTerms.test(btn.textContent || '')) return btn as HTMLElement;
+    }
+    return null;
+  }
+
+  // -- main logic --
+
   try {
-    // Find and fill username
     const usernameEl = usernameSel
       ? (document.querySelector(usernameSel) as HTMLInputElement)
-      : findUsernameInput();
+      : _findUsernameInput();
 
     if (!usernameEl) {
       return { filled: false, error: 'Username input not found' };
     }
 
-    // Find and fill password
     const passwordEl = passwordSel
       ? (document.querySelector(passwordSel) as HTMLInputElement)
       : (document.querySelector('input[type="password"]') as HTMLInputElement);
@@ -283,21 +398,16 @@ function performAutoLogin(
       return { filled: false, error: 'Password input not found' };
     }
 
-    // Fill username
-    fillInput(usernameEl, username);
+    _fillInput(usernameEl, username);
+    _fillInput(passwordEl, password);
 
-    // Fill password
-    fillInput(passwordEl, password);
-
-    // Find and click submit
     const submitEl = submitSel
       ? (document.querySelector(submitSel) as HTMLElement)
-      : findSubmitButton(passwordEl);
+      : _findSubmitButton(passwordEl);
 
     if (submitEl) {
       submitEl.click();
     } else {
-      // Try submitting the form directly
       const form = passwordEl.closest('form');
       if (form) {
         form.submit();
@@ -310,176 +420,4 @@ function performAutoLogin(
   } catch (err) {
     return { filled: false, error: err instanceof Error ? err.message : String(err) };
   }
-}
-
-// ---- Helper functions used inside injected scripts ----
-
-function fillInput(el: HTMLInputElement, value: string): void {
-  // Focus the element first (some React apps need this)
-  el.focus();
-
-  // Set the native value setter to bypass React's synthetic event system
-  const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
-    HTMLInputElement.prototype,
-    'value',
-  )?.set;
-
-  if (nativeInputValueSetter) {
-    nativeInputValueSetter.call(el, value);
-  } else {
-    el.value = value;
-  }
-
-  // Dispatch events that React and other frameworks listen to
-  el.dispatchEvent(new Event('input', { bubbles: true }));
-  el.dispatchEvent(new Event('change', { bubbles: true }));
-}
-
-function findUsernameInput(): HTMLInputElement | null {
-  // Priority order of selectors for username/email fields
-  const selectors = [
-    'input[type="email"]',
-    'input[name="email"]',
-    'input[name="username"]',
-    'input[name="user"]',
-    'input[autocomplete="email"]',
-    'input[autocomplete="username"]',
-    'input[id*="email" i]',
-    'input[id*="user" i]',
-    'input[placeholder*="email" i]',
-    'input[placeholder*="user" i]',
-  ];
-
-  for (const sel of selectors) {
-    const el = document.querySelector(sel) as HTMLInputElement;
-    if (el && el.type !== 'password' && el.type !== 'hidden') {
-      return el;
-    }
-  }
-
-  // Fallback: first visible text/email input before the password field
-  const passwordInput = document.querySelector('input[type="password"]');
-  if (passwordInput) {
-    const form = passwordInput.closest('form') || document.body;
-    const inputs = form.querySelectorAll('input:not([type="hidden"]):not([type="password"]):not([type="checkbox"]):not([type="radio"]):not([type="submit"])');
-    if (inputs.length > 0) {
-      return inputs[0] as HTMLInputElement;
-    }
-  }
-
-  return null;
-}
-
-function findSubmitButton(nearElement: HTMLElement): HTMLElement | null {
-  const form = nearElement.closest('form');
-  const container = form || document.body;
-
-  // Priority order
-  const selectors = [
-    'button[type="submit"]',
-    'input[type="submit"]',
-    'button:not([type="button"]):not([type="reset"])',
-  ];
-
-  for (const sel of selectors) {
-    const el = container.querySelector(sel) as HTMLElement;
-    if (el) return el;
-  }
-
-  // Look for buttons with login-related text
-  const buttons = container.querySelectorAll('button, [role="button"]');
-  const loginTerms = /log\s*in|sign\s*in|submit|enter|continue/i;
-  for (const btn of buttons) {
-    if (loginTerms.test(btn.textContent || '')) {
-      return btn as HTMLElement;
-    }
-  }
-
-  return null;
-}
-
-function findUsernameSelector(passwordInput: HTMLElement): string | null {
-  const el = findUsernameInputRelativeTo(passwordInput);
-  return el ? buildSelector(el) : null;
-}
-
-function findUsernameInputRelativeTo(passwordInput: HTMLElement): HTMLInputElement | null {
-  const selectors = [
-    'input[type="email"]',
-    'input[name="email"]',
-    'input[name="username"]',
-    'input[name="user"]',
-    'input[autocomplete="email"]',
-    'input[autocomplete="username"]',
-    'input[id*="email" i]',
-    'input[id*="user" i]',
-  ];
-
-  const form = passwordInput.closest('form') || document.body;
-
-  for (const sel of selectors) {
-    const el = form.querySelector(sel) as HTMLInputElement;
-    if (el && el.type !== 'password' && el.type !== 'hidden') {
-      return el;
-    }
-  }
-
-  // Fallback: first visible input before password
-  const inputs = form.querySelectorAll('input:not([type="hidden"]):not([type="password"]):not([type="checkbox"]):not([type="radio"]):not([type="submit"])');
-  if (inputs.length > 0) {
-    return inputs[0] as HTMLInputElement;
-  }
-
-  return null;
-}
-
-function findSubmitSelector(passwordInput: HTMLElement): string | null {
-  const el = findSubmitButton(passwordInput);
-  return el ? buildSelector(el) : null;
-}
-
-function buildSelector(el: Element): string {
-  // Try ID first
-  if (el.id) {
-    return `#${CSS.escape(el.id)}`;
-  }
-
-  // Try name attribute
-  const name = el.getAttribute('name');
-  if (name) {
-    const tag = el.tagName.toLowerCase();
-    const type = el.getAttribute('type');
-    const sel = type ? `${tag}[type="${type}"][name="${name}"]` : `${tag}[name="${name}"]`;
-    if (document.querySelectorAll(sel).length === 1) {
-      return sel;
-    }
-  }
-
-  // Try type + placeholder combo
-  const type = el.getAttribute('type');
-  const placeholder = el.getAttribute('placeholder');
-  if (type && placeholder) {
-    const sel = `input[type="${type}"][placeholder="${CSS.escape(placeholder)}"]`;
-    if (document.querySelectorAll(sel).length === 1) {
-      return sel;
-    }
-  }
-
-  // Fallback: type alone
-  if (type && type !== 'text') {
-    const sel = `input[type="${type}"]`;
-    if (document.querySelectorAll(sel).length === 1) {
-      return sel;
-    }
-  }
-
-  // Last resort: nth-of-type
-  const parent = el.parentElement;
-  if (parent) {
-    const siblings = Array.from(parent.children).filter((c) => c.tagName === el.tagName);
-    const index = siblings.indexOf(el) + 1;
-    return `${el.tagName.toLowerCase()}:nth-of-type(${index})`;
-  }
-
-  return el.tagName.toLowerCase();
 }
