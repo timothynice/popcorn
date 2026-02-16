@@ -178,11 +178,10 @@ export class AuthManager {
         const results = await chrome.scripting.executeScript({
           target: { tabId },
           func: () => {
-            const w = window as unknown as Record<string, unknown>;
-            const r = w.__popcornLoginResult as { success: boolean; phase: string; error?: string } | undefined;
-            if (r) {
-              delete w.__popcornLoginResult;
-              return r;
+            const raw = document.documentElement.getAttribute('data-popcorn-login-result');
+            if (raw) {
+              document.documentElement.removeAttribute('data-popcorn-login-result');
+              try { return JSON.parse(raw); } catch { return null; }
             }
             return null;
           },
@@ -316,7 +315,7 @@ function injectLoginScript(
     if (!usernameEl || !passwordEl) {
       result.phase = 'find_inputs';
       result.error = 'Could not find username or password input';
-      window.__popcornLoginResult = result;
+      document.documentElement.setAttribute('data-popcorn-login-result', JSON.stringify(result));
       return;
     }
 
@@ -328,7 +327,7 @@ function injectLoginScript(
     if (!nativeInputValueSetter) {
       result.phase = 'native_setter';
       result.error = 'Could not get native input value setter';
-      window.__popcornLoginResult = result;
+      document.documentElement.setAttribute('data-popcorn-login-result', JSON.stringify(result));
       return;
     }
 
@@ -358,7 +357,7 @@ function injectLoginScript(
     if (!usernameEl.value || !passwordEl.value) {
       result.phase = 'verify_fill';
       result.error = 'Values did not persist after fill';
-      window.__popcornLoginResult = result;
+      document.documentElement.setAttribute('data-popcorn-login-result', JSON.stringify(result));
       return;
     }
 
