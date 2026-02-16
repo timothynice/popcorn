@@ -30,6 +30,7 @@ export class BridgeServer {
   private token: string;
   private queue: PopcornMessage[] = [];
   private resultCallbacks: ResultCallback[] = [];
+  private shutdownCallbacks: (() => void | Promise<void>)[] = [];
   private config: Record<string, unknown>;
 
   constructor(options?: { preferredPort?: number; config?: Record<string, unknown> }) {
@@ -100,6 +101,11 @@ export class BridgeServer {
     this.resultCallbacks.push(cb);
   }
 
+  /** Registers a callback invoked when a shutdown is requested via POST /shutdown. */
+  onShutdown(cb: () => void | Promise<void>): void {
+    this.shutdownCallbacks.push(cb);
+  }
+
   /** Updates the config object. */
   setConfig(config: Record<string, unknown>): void {
     this.config = config;
@@ -164,6 +170,8 @@ export class BridgeServer {
       this.handleGetPlans(req, res);
     } else if (url.startsWith('/plans/') && req.method === 'GET') {
       this.handleGetPlan(req, res, url);
+    } else if (url === '/shutdown' && req.method === 'POST') {
+      this.handleShutdown(req, res);
     } else {
       this.json(res, 404, { ok: false, error: 'Not found' });
     }
@@ -324,6 +332,19 @@ export class BridgeServer {
       log.error('Failed to load plan', { planName, error: (err as Error).message });
       this.json(res, 404, { ok: false, error: 'Plan not found' });
     });
+  }
+
+  /** POST /shutdown — gracefully shuts down the bridge server. Requires token. */
+  private handleShutdown(req: http.IncomingMessage, res: http.ServerResponse): void {
+    if (!this.checkToken(req, res)) return;
+    this.json(res, 200, { ok: true, message: 'Shutting down' });
+    // Give the response time to flush, then stop and fire callbacks
+    setTimeout(() => {
+      this.stop();
+      for (const cb of this.shutdownCallbacks) {
+        try { cb(); } catch { /* swallow */ }
+      }
+    }, 100);
   }
 
   /** Validates the X-Popcorn-Token header. Returns false and sends 401 if invalid. */

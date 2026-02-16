@@ -183,6 +183,25 @@ export async function sendResult(msg: unknown, port: number, token: string): Pro
   }
 }
 
+/** Sends POST /shutdown to a specific hook to stop it remotely. */
+export async function stopHook(port: number, token: string): Promise<boolean> {
+  try {
+    const resp = await fetch(`http://127.0.0.1:${port}/shutdown`, {
+      method: 'POST',
+      headers: { 'X-Popcorn-Token': token },
+      signal: AbortSignal.timeout(3000),
+    });
+    if (resp.ok) {
+      activeHooks.delete(port);
+      hookConnected = activeHooks.size > 0;
+      return true;
+    }
+  } catch {
+    // Hook may already be gone
+  }
+  return false;
+}
+
 /** Internal: single poll cycle — discovers all hooks and polls each one. */
 async function pollOnce(): Promise<void> {
   if (!messageHandler) return;

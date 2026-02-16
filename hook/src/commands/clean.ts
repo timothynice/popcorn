@@ -5,34 +5,13 @@
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { killBridgeDaemon } from '../daemon-utils.js';
 
 export interface CleanResult {
   /** Paths that were removed. */
   removed: string[];
   /** Paths that were skipped (didn't exist). */
   skipped: string[];
-}
-
-/**
- * Attempts to kill a running bridge server by reading its PID from
- * .popcorn/bridge.json before the directory is deleted.
- */
-async function killBridgeDaemon(projectRoot: string): Promise<void> {
-  try {
-    const bridgePath = path.resolve(projectRoot, '.popcorn', 'bridge.json');
-    const raw = await fs.readFile(bridgePath, 'utf-8');
-    const data = JSON.parse(raw) as Record<string, unknown>;
-    const pid = data.pid;
-    if (typeof pid === 'number') {
-      try {
-        process.kill(pid, 'SIGTERM');
-      } catch {
-        // Process already dead — ignore
-      }
-    }
-  } catch {
-    // No bridge.json or unreadable — nothing to kill
-  }
 }
 
 /**

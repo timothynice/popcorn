@@ -12,7 +12,10 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { runInit } from './commands/init.js';
 import { runClean } from './commands/clean.js';
+import { runStop } from './commands/stop.js';
+import { runStatus } from './commands/status.js';
 import { runServe } from './commands/serve.js';
+import { readBridgeJson, isProcessAlive } from './daemon-utils.js';
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -90,6 +93,31 @@ async function main(): Promise<void> {
     }
 
     console.log('\nPopcorn removed. Run `popcorn init` to set up again.');
+  } else if (command === 'stop') {
+    const projectRoot = process.cwd();
+    const result = await runStop(projectRoot);
+    if (result.reason === 'no_bridge_json') {
+      console.log('No bridge daemon found for this project.');
+    } else if (result.reason === 'not_running') {
+      console.log(`Bridge daemon (pid ${result.pid}) is no longer running. Cleaned up stale state.`);
+    } else {
+      console.log(`Bridge daemon stopped (pid ${result.pid}, port ${result.port}).`);
+    }
+  } else if (command === 'status') {
+    const projectRoot = process.cwd();
+    const result = await runStatus(projectRoot);
+    if (!result.running) {
+      console.log('Bridge daemon: not running');
+      if (result.pid) {
+        console.log(`  Last PID: ${result.pid} (port ${result.port})`);
+      }
+    } else {
+      console.log('Bridge daemon: running');
+      console.log(`  PID:     ${result.pid}`);
+      console.log(`  Port:    ${result.port}`);
+      console.log(`  Uptime:  ${result.uptime}`);
+      console.log(`  Started: ${result.startedAt}`);
+    }
   } else if (command === 'serve') {
     const projectRoot = process.cwd();
     await runServe(projectRoot);
@@ -98,6 +126,8 @@ async function main(): Promise<void> {
     console.log('Commands:');
     console.log('  init     Scaffold Popcorn for this project');
     console.log('  clean    Remove all Popcorn scaffolding from this project');
+    console.log('  status   Show bridge daemon status for this project');
+    console.log('  stop     Stop the bridge daemon for this project');
     console.log('  serve    Start persistent bridge server for Chrome extension');
     if (command && command !== '--help' && command !== '-h') {
       process.exit(1);
@@ -110,6 +140,13 @@ async function main(): Promise<void> {
  * Returns true if the daemon started successfully.
  */
 async function startServeDaemon(projectRoot: string): Promise<boolean> {
+  // Check if a daemon is already running for this project
+  const existing = await readBridgeJson(projectRoot);
+  if (existing && isProcessAlive(existing.pid)) {
+    console.log(`\nBridge server already running (pid ${existing.pid}, port ${existing.port}).`);
+    return true;
+  }
+
   try {
     const thisFile = fileURLToPath(import.meta.url);
     const cliPath = path.resolve(path.dirname(thisFile), 'cli.js');

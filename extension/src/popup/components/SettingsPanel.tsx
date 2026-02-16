@@ -32,6 +32,8 @@ export function SettingsPanel({
   const [authDirty, setAuthDirty] = useState(false);
   const [authSaving, setAuthSaving] = useState(false);
   const [authLoaded, setAuthLoaded] = useState(false);
+  const [hooks, setHooks] = useState<Array<{ port: number; token: string; baseUrl: string | null }>>([]);
+  const [stoppingPort, setStoppingPort] = useState<number | null>(null);
 
   useEffect(() => {
     chrome.runtime.sendMessage({ type: 'get_tape_count' })
@@ -44,6 +46,16 @@ export function SettingsPanel({
         // Background may not handle this yet
       });
   }, [clearing]);
+
+  useEffect(() => {
+    chrome.runtime.sendMessage({ type: 'get_hooks' })
+      .then((response) => {
+        if (response?.success && Array.isArray(response.hooks)) {
+          setHooks(response.hooks);
+        }
+      })
+      .catch(() => {});
+  }, [hookConnected]);
 
   useEffect(() => {
     if (hookConnected) {
@@ -130,6 +142,17 @@ export function SettingsPanel({
     setAuthDirty(true);
   };
 
+  const handleStopHook = async (port: number, token: string) => {
+    setStoppingPort(port);
+    try {
+      await chrome.runtime.sendMessage({ type: 'stop_hook', payload: { port, token } });
+      setHooks(hooks.filter((h) => h.port !== port));
+    } catch {
+      // ignore
+    }
+    setStoppingPort(null);
+  };
+
   const getStatusLabel = () => {
     switch (status) {
       case 'recording': return 'Recording';
@@ -201,14 +224,37 @@ export function SettingsPanel({
             <span className={styles.statusValue}>
               {connected ? getStatusLabel() : 'Disconnected'}
             </span>
-            <span className={styles.statusLabel}>Hook:</span>
+            <span className={styles.statusLabel}>Hooks:</span>
             <span className={styles.statusValue}>
-              {hookConnected ? 'Connected' : 'Waiting for hook...'}
+              {hooks.length > 0 ? `${hooks.length} connected` : 'No hooks connected'}
             </span>
           </div>
+          {hooks.length > 0 && (
+            <div className={styles.hookList}>
+              {hooks.map((hook) => (
+                <div key={hook.port} className={styles.hookRow}>
+                  <span className={styles.hookInfo}>
+                    <code>:{hook.port}</code>
+                    {hook.baseUrl && <span className={styles.hookUrl}>{hook.baseUrl}</span>}
+                  </span>
+                  <button
+                    className={styles.hookStopButton}
+                    onClick={() => handleStopHook(hook.port, hook.token)}
+                    disabled={stoppingPort === hook.port}
+                  >
+                    {stoppingPort === hook.port ? '...' : 'Stop'}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          {hooks.length === 0 && (
+            <p className={styles.statusHint}>
+              Run <code>popcorn init</code> in a project to start a bridge daemon.
+            </p>
+          )}
           <p className={styles.statusHint}>
             Demos run on the active tab. Make sure your app is open in Chrome.
-            You can set <code>baseUrl</code> in <code>popcorn.config.json</code> as a fallback.
           </p>
         </section>
 

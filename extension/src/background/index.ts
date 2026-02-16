@@ -8,7 +8,7 @@
 import type { PopcornMessage, StartDemoMessage } from '@popcorn/shared';
 import { isPopcornMessage, createMessage } from '@popcorn/shared';
 import { initExternalMessaging } from './external-messaging.js';
-import { initBridgePolling, isHookConnected, discoverHookPort, getActiveHooks } from './bridge-client.js';
+import { initBridgePolling, isHookConnected, discoverHookPort, getActiveHooks, stopHook } from './bridge-client.js';
 import type { HookEntry } from './bridge-client.js';
 import { runFullDemo, runExplorationDemo, reloadTab } from './demo-flow.js';
 import { AuthManager } from './auth-manager.js';
@@ -192,6 +192,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           .then(() => sendResponse({ success: true }))
           .catch((err) => sendResponse({ success: false, error: err instanceof Error ? err.message : String(err) }));
         return true;
+      case 'get_hooks':
+        sendResponse({ success: true, hooks: getActiveHooks() });
+        return false;
+      case 'stop_hook': {
+        const { port: hookPort, token: hookToken } = message.payload ?? {};
+        stopHook(hookPort, hookToken)
+          .then((stopped) => sendResponse({ success: stopped }))
+          .catch(() => sendResponse({ success: false }));
+        return true;
+      }
       case 'test_auth': {
         const testTabPromise = chrome.tabs.query({ active: true, currentWindow: true });
         testTabPromise

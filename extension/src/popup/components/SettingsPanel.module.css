@@ -96,6 +96,63 @@
   padding: 1px 4px;
 }
 
+/* ---- Hook List ---- */
+
+.hookList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.hookRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+}
+
+.hookInfo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-primary);
+}
+
+.hookUrl {
+  font-family: var(--font-sans);
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.hookStopButton {
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  color: var(--accent-red);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  outline: none;
+}
+
+.hookStopButton:hover:not(:disabled) {
+  background: var(--bg-secondary);
+  border-color: var(--accent-red);
+}
+
+.hookStopButton:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 /* ---- Storage ---- */
 
 .storageRow {

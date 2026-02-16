@@ -223,4 +223,39 @@ describe('BridgeServer', () => {
     expect(res.headers.get('access-control-allow-origin')).toBe('*');
     expect(res.headers.get('access-control-allow-headers')).toContain('X-Popcorn-Token');
   });
+
+  it('POST /shutdown returns 401 without token', async () => {
+    await startServer(18912);
+    const { status, data } = await request(18912, '/shutdown', { method: 'POST' });
+    expect(status).toBe(401);
+    expect(data.ok).toBe(false);
+  });
+
+  it('POST /shutdown returns 200 with valid token and fires callback', async () => {
+    const server = await startServer(18913);
+    const token = server.getToken();
+
+    let shutdownCalled = false;
+    server.onShutdown(() => {
+      shutdownCalled = true;
+    });
+
+    const { status, data } = await request(18913, '/shutdown', {
+      method: 'POST',
+      headers: { 'X-Popcorn-Token': token },
+    });
+
+    expect(status).toBe(200);
+    expect(data.ok).toBe(true);
+
+    // Wait for the deferred shutdown callback (100ms timeout in implementation)
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(shutdownCalled).toBe(true);
+
+    // Server should be stopped
+    expect(server.getPort()).toBe(0);
+
+    // Remove from tracked list since it's already stopped
+    servers.splice(servers.indexOf(server), 1);
+  });
 });

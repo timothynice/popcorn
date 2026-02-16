@@ -47,6 +47,17 @@ export async function runServe(projectRoot: string): Promise<void> {
     log.info(`Result received: ${msg.type}`);
   });
 
+  // Handle remote shutdown via POST /shutdown
+  bridge.onShutdown(async () => {
+    log.info('Remote shutdown requested');
+    try {
+      await fs.unlink(bridgePath);
+    } catch {
+      // ignore
+    }
+    process.exit(0);
+  });
+
   // Graceful shutdown
   const shutdown = async () => {
     log.info('\nShutting down...');
