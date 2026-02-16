@@ -53,6 +53,27 @@ describe('BridgeServer', () => {
     expect((data.token as string).length).toBe(32);
   });
 
+  it('GET /health includes baseUrl from config', async () => {
+    const server = new BridgeServer({
+      preferredPort: 18920,
+      config: { baseUrl: 'http://localhost:8080' },
+    });
+    await server.start();
+    servers.push(server);
+
+    const { status, data } = await request(18920, '/health');
+
+    expect(status).toBe(200);
+    expect(data.baseUrl).toBe('http://localhost:8080');
+  });
+
+  it('GET /health returns null baseUrl when config has none', async () => {
+    const server = await startServer(18921);
+    const { data } = await request(18921, '/health');
+
+    expect(data.baseUrl).toBeNull();
+  });
+
   it('GET /poll returns 401 without X-Popcorn-Token header', async () => {
     await startServer(18902);
     const { status, data } = await request(18902, '/poll');

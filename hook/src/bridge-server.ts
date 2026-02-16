@@ -171,7 +171,13 @@ export class BridgeServer {
 
   /** GET /health — no auth required, used for discovery. */
   private handleHealth(res: http.ServerResponse): void {
-    this.json(res, 200, { ok: true, port: this.port, version: VERSION, token: this.token });
+    this.json(res, 200, {
+      ok: true,
+      port: this.port,
+      version: VERSION,
+      token: this.token,
+      baseUrl: (this.config.baseUrl as string) || null,
+    });
   }
 
   /** GET /poll — drains the message queue. Requires token. */

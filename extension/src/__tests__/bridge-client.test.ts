@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import {
   discoverHookPort,
+  discoverAllHooks,
+  getActiveHooks,
   pollForMessages,
   sendResult,
   initBridgePolling,
@@ -34,9 +36,15 @@ describe('bridge-client', () => {
   });
 
   it('discoverHookPort returns port info on success', async () => {
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ ok: true, token: 'test-token', port: 7890 }),
+    // discoverHookPort calls discoverAllHooks which probes all 10 ports in parallel
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url === 'http://127.0.0.1:7890/health') {
+        return {
+          ok: true,
+          json: async () => ({ ok: true, token: 'test-token', port: 7890, baseUrl: null }),
+        };
+      }
+      throw new Error('Connection refused');
     });
 
     const result = await discoverHookPort();
@@ -46,35 +54,80 @@ describe('bridge-client', () => {
       token: 'test-token',
       discoveredAt: expect.any(Number),
     });
-    expect(fetchMock).toHaveBeenCalledWith(
-      'http://127.0.0.1:7890/health',
-      expect.objectContaining({ signal: expect.any(AbortSignal) }),
-    );
   });
 
-  it('discoverHookPort uses cached value when fresh', async () => {
-    const cachedEntry = {
-      port: 7891,
-      token: 'cached-token',
-      discoveredAt: Date.now(),
-    };
-
-    chrome.storage.local.get = vi.fn(() =>
-      Promise.resolve({ popcorn_bridge_cache: cachedEntry })
-    );
-
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ ok: true, token: 'cached-token', port: 7891 }),
+  it('discoverAllHooks finds multiple hooks', async () => {
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url === 'http://127.0.0.1:7890/health') {
+        return {
+          ok: true,
+          json: async () => ({ ok: true, token: 'token-a', port: 7890, baseUrl: 'http://localhost:8080' }),
+        };
+      }
+      if (url === 'http://127.0.0.1:7891/health') {
+        return {
+          ok: true,
+          json: async () => ({ ok: true, token: 'token-b', port: 7891, baseUrl: 'http://localhost:3001' }),
+        };
+      }
+      throw new Error('Connection refused');
     });
 
-    const result = await discoverHookPort();
+    const hooks = await discoverAllHooks();
 
-    expect(result).toEqual(cachedEntry);
-    expect(fetchMock).toHaveBeenCalledWith(
-      'http://127.0.0.1:7891/health',
-      expect.any(Object),
-    );
+    expect(hooks).toHaveLength(2);
+    expect(hooks[0]).toEqual(expect.objectContaining({ port: 7890, token: 'token-a', baseUrl: 'http://localhost:8080' }));
+    expect(hooks[1]).toEqual(expect.objectContaining({ port: 7891, token: 'token-b', baseUrl: 'http://localhost:3001' }));
+  });
+
+  it('discoverAllHooks updates activeHooks map', async () => {
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url === 'http://127.0.0.1:7890/health') {
+        return {
+          ok: true,
+          json: async () => ({ ok: true, token: 'token-a', port: 7890, baseUrl: null }),
+        };
+      }
+      throw new Error('Connection refused');
+    });
+
+    await discoverAllHooks();
+
+    const active = getActiveHooks();
+    expect(active).toHaveLength(1);
+    expect(active[0].port).toBe(7890);
+  });
+
+  it('discoverAllHooks removes dead hooks', async () => {
+    // First discovery: both ports alive
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.includes('7890') || url.includes('7891')) {
+        const port = url.includes('7890') ? 7890 : 7891;
+        return {
+          ok: true,
+          json: async () => ({ ok: true, token: `token-${port}`, port, baseUrl: null }),
+        };
+      }
+      throw new Error('Connection refused');
+    });
+
+    await discoverAllHooks();
+    expect(getActiveHooks()).toHaveLength(2);
+
+    // Second discovery: only 7890 alive
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url === 'http://127.0.0.1:7890/health') {
+        return {
+          ok: true,
+          json: async () => ({ ok: true, token: 'token-7890', port: 7890, baseUrl: null }),
+        };
+      }
+      throw new Error('Connection refused');
+    });
+
+    await discoverAllHooks();
+    expect(getActiveHooks()).toHaveLength(1);
+    expect(getActiveHooks()[0].port).toBe(7890);
   });
 
   it('pollForMessages calls handler for each message', async () => {
@@ -169,5 +222,9 @@ describe('bridge-client', () => {
     });
     expect(chrome.alarms.onAlarm.addListener).toHaveBeenCalled();
     expect(isHookConnected()).toBe(false);
+  });
+
+  it('getActiveHooks returns empty array initially', () => {
+    expect(getActiveHooks()).toEqual([]);
   });
 });

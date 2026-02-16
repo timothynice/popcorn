@@ -8,7 +8,8 @@
 import type { PopcornMessage, StartDemoMessage } from '@popcorn/shared';
 import { isPopcornMessage, createMessage } from '@popcorn/shared';
 import { initExternalMessaging } from './external-messaging.js';
-import { initBridgePolling, isHookConnected, discoverHookPort } from './bridge-client.js';
+import { initBridgePolling, isHookConnected, discoverHookPort, getActiveHooks } from './bridge-client.js';
+import type { HookEntry } from './bridge-client.js';
 import { runFullDemo, runExplorationDemo, reloadTab } from './demo-flow.js';
 import { AuthManager } from './auth-manager.js';
 import type { ExplorationPlan } from '@popcorn/shared';
@@ -464,11 +465,48 @@ async function handleStartDemoMessage(
   }
 }
 
+/**
+ * Finds the hook whose baseUrl matches the active tab's origin.
+ * Falls back to any connected hook if no origin match.
+ */
+async function findHookForActiveTab(): Promise<{ port: number; token: string } | null> {
+  const hooks = getActiveHooks();
+  if (hooks.length === 0) {
+    // No cached hooks — try full discovery
+    const fallback = await discoverHookPort();
+    return fallback ? { port: fallback.port, token: fallback.token } : null;
+  }
+
+  if (hooks.length === 1) return { port: hooks[0].port, token: hooks[0].token };
+
+  // Multiple hooks — try to match by active tab's origin
+  try {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    const tabUrl = tabs[0]?.url;
+    if (tabUrl) {
+      const tabOrigin = new URL(tabUrl).origin;
+      for (const hook of hooks) {
+        if (hook.baseUrl) {
+          try {
+            const hookOrigin = new URL(hook.baseUrl).origin;
+            if (hookOrigin === tabOrigin) {
+              return { port: hook.port, token: hook.token };
+            }
+          } catch { /* invalid baseUrl */ }
+        }
+      }
+    }
+  } catch { /* tab query failed */ }
+
+  // Fallback: return first hook
+  return { port: hooks[0].port, token: hooks[0].token };
+}
+
 async function fetchHookConfig() {
-  const discovery = await discoverHookPort();
-  if (!discovery) throw new Error('Hook not connected');
-  const resp = await fetch(`http://127.0.0.1:${discovery.port}/config`, {
-    headers: { 'X-Popcorn-Token': discovery.token },
+  const hook = await findHookForActiveTab();
+  if (!hook) throw new Error('Hook not connected');
+  const resp = await fetch(`http://127.0.0.1:${hook.port}/config`, {
+    headers: { 'X-Popcorn-Token': hook.token },
   });
   if (!resp.ok) throw new Error('Failed to fetch config');
   const data = await resp.json();
@@ -476,21 +514,21 @@ async function fetchHookConfig() {
 }
 
 async function updateHookConfig(config: unknown) {
-  const discovery = await discoverHookPort();
-  if (!discovery) throw new Error('Hook not connected');
-  const resp = await fetch(`http://127.0.0.1:${discovery.port}/config`, {
+  const hook = await findHookForActiveTab();
+  if (!hook) throw new Error('Hook not connected');
+  const resp = await fetch(`http://127.0.0.1:${hook.port}/config`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Popcorn-Token': discovery.token },
+    headers: { 'Content-Type': 'application/json', 'X-Popcorn-Token': hook.token },
     body: JSON.stringify({ config }),
   });
   if (!resp.ok) throw new Error('Failed to update config');
 }
 
 async function fetchPlans() {
-  const discovery = await discoverHookPort();
-  if (!discovery) throw new Error('Hook not connected');
-  const resp = await fetch(`http://127.0.0.1:${discovery.port}/plans`, {
-    headers: { 'X-Popcorn-Token': discovery.token },
+  const hook = await findHookForActiveTab();
+  if (!hook) throw new Error('Hook not connected');
+  const resp = await fetch(`http://127.0.0.1:${hook.port}/plans`, {
+    headers: { 'X-Popcorn-Token': hook.token },
   });
   if (!resp.ok) throw new Error('Failed to fetch plans');
   const data = await resp.json();
@@ -498,10 +536,10 @@ async function fetchPlans() {
 }
 
 async function fetchPlan(planName: string) {
-  const discovery = await discoverHookPort();
-  if (!discovery) throw new Error('Hook not connected');
-  const resp = await fetch(`http://127.0.0.1:${discovery.port}/plans/${planName}`, {
-    headers: { 'X-Popcorn-Token': discovery.token },
+  const hook = await findHookForActiveTab();
+  if (!hook) throw new Error('Hook not connected');
+  const resp = await fetch(`http://127.0.0.1:${hook.port}/plans/${planName}`, {
+    headers: { 'X-Popcorn-Token': hook.token },
   });
   if (!resp.ok) throw new Error('Failed to fetch plan');
   const data = await resp.json();

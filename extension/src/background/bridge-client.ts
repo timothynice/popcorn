@@ -1,26 +1,29 @@
 /**
- * Bridge client for connecting the Chrome extension background to the
- * Popcorn hook's HTTP server. Discovers the hook via port probing,
- * polls for messages via chrome.alarms, and sends results back.
+ * Bridge client for connecting the Chrome extension background to
+ * Popcorn hook HTTP servers. Supports multiple simultaneous hooks
+ * (one per project) by probing all ports in the range and polling
+ * each active hook for messages.
  */
 
 const POPCORN_PORT_RANGE = [7890, 7891, 7892, 7893, 7894, 7895, 7896, 7897, 7898, 7899];
 const POLL_ALARM_NAME = 'popcorn-poll';
-const CACHE_KEY = 'popcorn_bridge_cache';
+const CACHE_KEY = 'popcorn_bridge_hooks';
 const CACHE_TTL_MS = 60_000;
 
 type MessageHandler = (msg: unknown) => Promise<unknown>;
 
-interface BridgeCache {
+export interface HookEntry {
   port: number;
   token: string;
+  baseUrl: string | null;
   discoveredAt: number;
 }
 
 let hookConnected = false;
 let messageHandler: MessageHandler | null = null;
+let activeHooks: Map<number, HookEntry> = new Map();
 
-/** Starts polling the hook HTTP server for messages. */
+/** Starts polling all hook HTTP servers for messages. */
 export function initBridgePolling(onMessage: MessageHandler): void {
   messageHandler = onMessage;
 
@@ -44,58 +47,102 @@ export function stopBridgePolling(): void {
   chrome.alarms.clear(POLL_ALARM_NAME);
   messageHandler = null;
   hookConnected = false;
+  activeHooks.clear();
 }
 
-/** Returns whether the hook is currently reachable. */
+/** Returns whether at least one hook is currently reachable. */
 export function isHookConnected(): boolean {
   return hookConnected;
 }
 
-/** Discovers the hook's HTTP server by probing ports 7890-7899. */
-export async function discoverHookPort(): Promise<BridgeCache | null> {
+/** Returns all currently active hook entries. */
+export function getActiveHooks(): HookEntry[] {
+  return Array.from(activeHooks.values());
+}
+
+/**
+ * Discovers the hook's HTTP server by probing ports 7890-7899.
+ * Returns the first (or any) active hook for backward compatibility.
+ * Prefer getActiveHooks() for multi-hook scenarios.
+ */
+export async function discoverHookPort(): Promise<{ port: number; token: string; discoveredAt: number } | null> {
+  // If we already have active hooks, return the first one
+  if (activeHooks.size > 0) {
+    const first = activeHooks.values().next().value;
+    if (first) return { port: first.port, token: first.token, discoveredAt: first.discoveredAt };
+  }
+
+  // Fall back to full discovery
+  const hooks = await discoverAllHooks();
+  if (hooks.length === 0) return null;
+  return { port: hooks[0].port, token: hooks[0].token, discoveredAt: hooks[0].discoveredAt };
+}
+
+/**
+ * Discovers ALL active hook servers on ports 7890-7899.
+ * Probes all ports in parallel and returns entries for every responding server.
+ */
+export async function discoverAllHooks(): Promise<HookEntry[]> {
   // Check cache first
+  let cachedHooks: HookEntry[] = [];
   try {
     const cached = await chrome.storage.local.get(CACHE_KEY);
-    const entry = cached[CACHE_KEY] as BridgeCache | undefined;
-    if (entry && Date.now() - entry.discoveredAt < CACHE_TTL_MS) {
-      // Verify cached port still works
-      try {
-        const resp = await fetch(`http://127.0.0.1:${entry.port}/health`, {
-          signal: AbortSignal.timeout(1000),
-        });
-        if (resp.ok) return entry;
-      } catch {
-        // Cached port no longer works, re-probe
-      }
+    const entries = cached[CACHE_KEY] as HookEntry[] | undefined;
+    if (entries && Array.isArray(entries)) {
+      cachedHooks = entries.filter((e) => Date.now() - e.discoveredAt < CACHE_TTL_MS);
     }
   } catch {
     // Storage read failed
   }
 
-  // Probe all ports
-  for (const port of POPCORN_PORT_RANGE) {
-    try {
-      const resp = await fetch(`http://127.0.0.1:${port}/health`, {
-        signal: AbortSignal.timeout(1000),
-      });
-      if (resp.ok) {
-        const data = await resp.json();
-        if (data.ok && data.token) {
-          const entry: BridgeCache = {
-            port: data.port ?? port,
-            token: data.token,
-            discoveredAt: Date.now(),
-          };
-          await chrome.storage.local.set({ [CACHE_KEY]: entry });
-          return entry;
+  // Verify cached hooks are still alive + probe all ports for new ones
+  const probeResults = await Promise.allSettled(
+    POPCORN_PORT_RANGE.map(async (port) => {
+      try {
+        const resp = await fetch(`http://127.0.0.1:${port}/health`, {
+          signal: AbortSignal.timeout(1000),
+        });
+        if (resp.ok) {
+          const data = await resp.json();
+          if (data.ok && data.token) {
+            return {
+              port: data.port ?? port,
+              token: data.token,
+              baseUrl: data.baseUrl ?? null,
+              discoveredAt: Date.now(),
+            } as HookEntry;
+          }
         }
+      } catch {
+        // Port not available
       }
-    } catch {
-      // Port not available, continue
+      return null;
+    }),
+  );
+
+  const discovered: HookEntry[] = [];
+  for (const result of probeResults) {
+    if (result.status === 'fulfilled' && result.value) {
+      discovered.push(result.value);
     }
   }
 
-  return null;
+  // Update the active hooks map
+  activeHooks.clear();
+  for (const hook of discovered) {
+    activeHooks.set(hook.port, hook);
+  }
+
+  // Cache the discovered hooks
+  if (discovered.length > 0) {
+    try {
+      await chrome.storage.local.set({ [CACHE_KEY]: discovered });
+    } catch {
+      // Storage write failed
+    }
+  }
+
+  return discovered;
 }
 
 /** Polls the hook for queued messages and processes them. */
@@ -136,12 +183,13 @@ export async function sendResult(msg: unknown, port: number, token: string): Pro
   }
 }
 
-/** Internal: single poll cycle with connection state tracking. */
+/** Internal: single poll cycle — discovers all hooks and polls each one. */
 async function pollOnce(): Promise<void> {
   if (!messageHandler) return;
 
-  const bridge = await discoverHookPort();
-  if (!bridge) {
+  const hooks = await discoverAllHooks();
+
+  if (hooks.length === 0) {
     if (hookConnected) {
       hookConnected = false;
       chrome.runtime.sendMessage({
@@ -153,23 +201,30 @@ async function pollOnce(): Promise<void> {
   }
 
   const wasConnected = hookConnected;
-  try {
-    await pollForMessages(messageHandler, bridge.port, bridge.token);
-    hookConnected = true;
 
-    if (!wasConnected) {
-      chrome.runtime.sendMessage({
-        type: 'hook_status',
-        payload: { connected: true, port: bridge.port },
-      }).catch(() => {});
+  // Poll all active hooks
+  let anySuccess = false;
+  for (const hook of hooks) {
+    try {
+      await pollForMessages(messageHandler, hook.port, hook.token);
+      anySuccess = true;
+    } catch {
+      // This specific hook failed; others may still succeed
+      activeHooks.delete(hook.port);
     }
-  } catch {
-    hookConnected = false;
-    if (wasConnected) {
-      chrome.runtime.sendMessage({
-        type: 'hook_status',
-        payload: { connected: false },
-      }).catch(() => {});
-    }
+  }
+
+  hookConnected = anySuccess;
+
+  if (anySuccess && !wasConnected) {
+    chrome.runtime.sendMessage({
+      type: 'hook_status',
+      payload: { connected: true, hookCount: activeHooks.size },
+    }).catch(() => {});
+  } else if (!anySuccess && wasConnected) {
+    chrome.runtime.sendMessage({
+      type: 'hook_status',
+      payload: { connected: false },
+    }).catch(() => {});
   }
 }
