@@ -164,8 +164,9 @@ export class AuthManager {
       };
     }
 
-    // Step 2: Wait for React to process the filled values, then click submit
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    // Step 2: Wait for React to process the filled values, then click submit.
+    // shadcn/Radix buttons may stay disabled until React state updates propagate.
+    await new Promise((resolve) => setTimeout(resolve, 800));
 
     try {
       await chrome.scripting.executeScript({
@@ -357,7 +358,12 @@ function performFillCredentials(
   // -- inline helpers (must be inside injected function) --
 
   function _fillInput(el: HTMLInputElement, value: string): void {
+    // Focus the element first (some frameworks only listen when focused)
     el.focus();
+    el.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
+    el.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+
+    // Use the native setter to bypass React's synthetic event system
     const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
       HTMLInputElement.prototype, 'value',
     )?.set;
@@ -366,8 +372,14 @@ function performFillCredentials(
     } else {
       el.value = value;
     }
+
+    // Fire the full event sequence React listens for
     el.dispatchEvent(new Event('input', { bubbles: true }));
     el.dispatchEvent(new Event('change', { bubbles: true }));
+
+    // Blur to trigger validation and ensure React processes the final value
+    el.dispatchEvent(new FocusEvent('blur', { bubbles: true }));
+    el.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
   }
 
   function _findUsernameInput(): HTMLInputElement | null {
@@ -421,6 +433,9 @@ function performFillCredentials(
 /**
  * Clicks the submit button on the login form.
  * Injected via chrome.scripting.executeScript after a delay from filling.
+ *
+ * Uses multiple click strategies because UI frameworks (shadcn, Radix, MUI)
+ * sometimes intercept or delegate events in ways that `.click()` alone misses.
  */
 function performClickSubmit(
   submitSel: string | null,
@@ -446,6 +461,26 @@ function performClickSubmit(
     return null;
   }
 
+  /** Simulate a full user-like click sequence (pointer + mouse + click). */
+  function _simulateClick(el: HTMLElement): void {
+    const rect = el.getBoundingClientRect();
+    const x = rect.left + rect.width / 2;
+    const y = rect.top + rect.height / 2;
+    const opts: MouseEventInit = {
+      bubbles: true,
+      cancelable: true,
+      view: window,
+      clientX: x,
+      clientY: y,
+    };
+
+    el.dispatchEvent(new PointerEvent('pointerdown', opts));
+    el.dispatchEvent(new MouseEvent('mousedown', opts));
+    el.dispatchEvent(new PointerEvent('pointerup', opts));
+    el.dispatchEvent(new MouseEvent('mouseup', opts));
+    el.dispatchEvent(new MouseEvent('click', opts));
+  }
+
   try {
     const passwordEl = document.querySelector('input[type="password"]') as HTMLElement;
 
@@ -454,14 +489,34 @@ function performClickSubmit(
       : (passwordEl ? _findSubmitButton(passwordEl) : null);
 
     if (submitEl) {
-      submitEl.click();
+      // Remove disabled attribute if present (React may re-enable it on next
+      // tick but some frameworks leave it stale after programmatic fills)
+      if ((submitEl as HTMLButtonElement).disabled) {
+        (submitEl as HTMLButtonElement).disabled = false;
+      }
+
+      // Strategy 1: Full pointer/mouse event sequence (works with most UI libs)
+      _simulateClick(submitEl);
+
+      // Strategy 2: Also try form.requestSubmit(button) which faithfully
+      // simulates a submit-button click including onSubmit handlers
+      const form = submitEl.closest('form');
+      if (form) {
+        try {
+          form.requestSubmit(submitEl as HTMLButtonElement);
+        } catch {
+          // requestSubmit with param may throw if button isn't a submit button
+          try { form.requestSubmit(); } catch { /* ignore */ }
+        }
+      }
+
       return { clicked: true };
     }
 
     // Fallback: submit the form directly
     const form = passwordEl?.closest('form');
     if (form) {
-      form.requestSubmit(); // requestSubmit triggers onSubmit handlers (unlike form.submit())
+      form.requestSubmit();
       return { clicked: true };
     }
 
