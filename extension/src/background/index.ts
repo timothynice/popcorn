@@ -313,6 +313,7 @@ async function handleRerunWithRecording(tapeId: string) {
   }
 
   const tabId = tabs[0].id;
+  const currentUrl = tabs[0].url;
 
   // Force reload to ensure fresh app state before re-run.
   // Without this, the app stays at whatever state the previous demo left it
@@ -345,6 +346,7 @@ async function handleRerunWithRecording(tapeId: string) {
       tapeStore,
       onTapeSaved: notifyTapeSaved,
       skipRecording: false,
+      originalUrl: currentUrl,
     });
 
     updateStatus('complete');

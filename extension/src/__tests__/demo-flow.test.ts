@@ -464,7 +464,7 @@ describe('demo-flow', () => {
 
     // Navigate step is handled by the background via chrome.tabs.update,
     // so only the click step is sent to the content script
-    expect(chromeMock.tabs.update).toHaveBeenCalledWith(42, { url: '/page' });
+    expect(chromeMock.tabs.update).toHaveBeenCalledWith(42, { url: 'http://localhost:3000/page' });
     expect(chromeMock.tabs.sendMessage).toHaveBeenCalledWith(42, {
       type: 'execute_plan',
       payload: {

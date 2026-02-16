@@ -108,7 +108,7 @@ export async function runFullDemo(
 
         const stepStart = Date.now();
         if (step.action === 'navigate' && step.target) {
-          const resolvedTarget = resolveNavigateTarget(step.target, deps.originalUrl);
+          const resolvedTarget = resolveNavigateTarget(step.target, deps.originalUrl, testPlan.baseUrl);
           console.log(`[Popcorn] Background navigating to: ${resolvedTarget}`);
           await navigateTab(tabId, resolvedTarget);
         } else if (step.action === 'go_back') {
@@ -457,15 +457,18 @@ export function groupStepRounds(steps: TestStep[]): StepRound[] {
  * e.g. "/" + "http://localhost:8080/page" → "http://localhost:8080/"
  * Absolute URLs are returned as-is.
  */
-function resolveNavigateTarget(target: string, originalUrl?: string): string {
+function resolveNavigateTarget(target: string, originalUrl?: string, baseUrl?: string): string {
   if (target.startsWith('http://') || target.startsWith('https://')) {
     return target;
   }
-  if (originalUrl) {
-    try {
-      return new URL(target, originalUrl).href;
-    } catch {
-      // Fall through
+  // Try resolving against the current tab URL first, then the test plan's baseUrl
+  for (const base of [originalUrl, baseUrl]) {
+    if (base) {
+      try {
+        return new URL(target, base).href;
+      } catch {
+        // Invalid base URL — try next
+      }
     }
   }
   return target;
