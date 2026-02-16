@@ -121,11 +121,17 @@ export class AuthManager {
   /**
    * Attempts to auto-login by filling credentials and submitting the form.
    *
-   * Uses the content script (injected via files: ['content.js']) to fill and
-   * click, because it runs in the same execution context as the page's React
-   * handlers. Previous attempts using chrome.scripting.executeScript with
-   * inline functions failed because dispatched events (even with world: 'MAIN')
-   * didn't reliably trigger React's synthetic event system.
+   * Uses a <script> tag injection strategy to guarantee MAIN world execution:
+   * 1. executeScript (ISOLATED world) injects a <script> element into the DOM
+   * 2. The <script> tag runs in the MAIN world (it's a page script)
+   * 3. The script uses React's internal nativeInputValueSetter to update
+   *    controlled input values and trigger real React onChange handlers
+   * 4. Results are communicated via window.__popcornLoginResult (shared DOM)
+   *
+   * This approach is necessary because:
+   * - chrome.scripting.executeScript with world:'MAIN' has been unreliable
+   * - Content scripts run in ISOLATED world and can't trigger React handlers
+   * - Inline <script> tags are guaranteed to execute in the page's JS context
    */
   async autoLogin(tabId: number): Promise<AutoLoginResult> {
     const settings = await this.getSettings();
@@ -140,77 +146,63 @@ export class AuthManager {
       return { success: true, finalUrl: tab.url || '' };
     }
 
-    // Ensure the content script is loaded so we can use its fill/click actions
-    console.log('[Popcorn] Auto-login: injecting content script');
-    await this.ensureContentScriptLoaded(tabId);
-
-    // Build selectors — prefer detected ones, fall back to generic
     const usernameSel = loginCheck.usernameSelector || 'input[type="email"]';
     const passwordSel = loginCheck.passwordSelector || 'input[type="password"]';
     const submitSel = loginCheck.submitSelector || 'button[type="submit"]';
 
-    // Step 1: Fill username via content script
-    console.log('[Popcorn] Auto-login step 1: filling username');
+    // Inject a <script> tag into the page DOM — guaranteed MAIN world execution
+    console.log('[Popcorn] Auto-login: injecting <script> tag for MAIN world fill+submit');
     try {
-      const fillUsernameResult = await chrome.tabs.sendMessage(tabId, {
-        type: 'execute_plan',
-        payload: {
-          steps: [{
-            stepNumber: 1,
-            action: 'fill' as const,
-            selector: usernameSel,
-            value: settings.username,
-            description: 'Fill username',
-          }],
-        },
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        func: injectLoginScript,
+        args: [
+          settings.username,
+          settings.password,
+          usernameSel,
+          passwordSel,
+          submitSel,
+        ],
       });
-      console.log('[Popcorn] Username fill result:', JSON.stringify(fillUsernameResult?.results?.[0]?.passed));
     } catch (err) {
-      console.warn('[Popcorn] Username fill failed:', err);
+      console.warn('[Popcorn] Script injection failed:', err);
     }
 
-    // Step 2: Fill password via content script
-    console.log('[Popcorn] Auto-login step 2: filling password');
-    try {
-      const fillPasswordResult = await chrome.tabs.sendMessage(tabId, {
-        type: 'execute_plan',
-        payload: {
-          steps: [{
-            stepNumber: 2,
-            action: 'fill' as const,
-            selector: passwordSel,
-            value: settings.password,
-            description: 'Fill password',
-          }],
-        },
-      });
-      console.log('[Popcorn] Password fill result:', JSON.stringify(fillPasswordResult?.results?.[0]?.passed));
-    } catch (err) {
-      console.warn('[Popcorn] Password fill failed:', err);
+    // Wait for the injected script to finish (it sets window.__popcornLoginResult)
+    // Poll for up to 5 seconds
+    let loginResult: { success: boolean; phase: string; error?: string } | null = null;
+    const pollStart = Date.now();
+    while (Date.now() - pollStart < 5000) {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      try {
+        const results = await chrome.scripting.executeScript({
+          target: { tabId },
+          func: () => {
+            const w = window as unknown as Record<string, unknown>;
+            const r = w.__popcornLoginResult as { success: boolean; phase: string; error?: string } | undefined;
+            if (r) {
+              delete w.__popcornLoginResult;
+              return r;
+            }
+            return null;
+          },
+        });
+        if (results?.[0]?.result) {
+          loginResult = results[0].result as { success: boolean; phase: string; error?: string };
+          break;
+        }
+      } catch {
+        // continue polling
+      }
     }
 
-    // Step 3: Small delay for React state to process, then click submit
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    console.log('[Popcorn] Auto-login step 3: clicking submit');
-    try {
-      const clickResult = await chrome.tabs.sendMessage(tabId, {
-        type: 'execute_plan',
-        payload: {
-          steps: [{
-            stepNumber: 3,
-            action: 'click' as const,
-            selector: submitSel,
-            description: 'Click submit',
-          }],
-        },
-      });
-      console.log('[Popcorn] Submit click result:', JSON.stringify(clickResult?.results?.[0]?.passed));
-    } catch (err) {
-      console.warn('[Popcorn] Submit click failed:', err);
+    console.log('[Popcorn] Login script result:', JSON.stringify(loginResult));
+    if (!loginResult?.success) {
+      console.warn('[Popcorn] Login script failed at phase:', loginResult?.phase, loginResult?.error);
     }
 
-    // Step 4: Wait for navigation away from login page (poll up to 10s)
-    console.log('[Popcorn] Auto-login step 4: waiting for redirect');
+    // Wait for navigation away from login page (poll up to 10s)
+    console.log('[Popcorn] Auto-login: waiting for redirect');
     const finalUrl = await this.waitForLoginRedirect(tabId, settings.loginPatterns, 10000);
 
     if (finalUrl) {
@@ -224,24 +216,6 @@ export class AuthManager {
       finalUrl: finalUrl || '',
       error: finalUrl === null ? 'Timed out waiting for login redirect' : undefined,
     };
-  }
-
-  /**
-   * Ensures the content script is loaded in the given tab.
-   * Pings first to avoid re-injection errors.
-   */
-  private async ensureContentScriptLoaded(tabId: number): Promise<void> {
-    try {
-      const ping = await chrome.tabs.sendMessage(tabId, { type: 'ping' });
-      if (ping?.pong) return;
-    } catch {
-      // Content script not loaded
-    }
-    await chrome.scripting.executeScript({
-      target: { tabId },
-      files: ['content.js'],
-    });
-    await new Promise((r) => setTimeout(r, 200));
   }
 
   /**
@@ -306,10 +280,119 @@ export class AuthManager {
   }
 }
 
-// ---- Injected functions (run in page context) ----
-// IMPORTANT: These functions are serialized by chrome.scripting.executeScript
-// and run in the page's isolated context. They CANNOT reference any other
-// functions or variables from this module — all helpers must be inlined.
+// ---- Injected functions (serialized by chrome.scripting.executeScript) ----
+// IMPORTANT: These functions CANNOT reference any other functions or variables
+// from this module — all helpers must be inlined.
+
+/**
+ * Injected into ISOLATED world. Creates a <script> tag that runs in MAIN world.
+ * The script fills inputs using React's nativeInputValueSetter (bypasses
+ * controlled component checks), dispatches real events, and submits the form.
+ *
+ * This is the nuclear option: <script> tags always run in the page's JS context,
+ * unlike executeScript which has been unreliable with world:'MAIN'.
+ */
+function injectLoginScript(
+  username: string,
+  password: string,
+  usernameSel: string,
+  passwordSel: string,
+  submitSel: string,
+): void {
+  const script = document.createElement('script');
+  script.textContent = `
+(async function __popcornLogin() {
+  const LOG = (msg) => console.log('[Popcorn MAIN]', msg);
+  const result = { success: false, phase: 'init', error: '' };
+
+  try {
+    // Find the input elements
+    const usernameEl = document.querySelector(${JSON.stringify(usernameSel)});
+    const passwordEl = document.querySelector(${JSON.stringify(passwordSel)});
+    const submitEl = document.querySelector(${JSON.stringify(submitSel)});
+
+    LOG('Elements found: username=' + !!usernameEl + ' password=' + !!passwordEl + ' submit=' + !!submitEl);
+
+    if (!usernameEl || !passwordEl) {
+      result.phase = 'find_inputs';
+      result.error = 'Could not find username or password input';
+      window.__popcornLoginResult = result;
+      return;
+    }
+
+    // Get React's native setter — this bypasses controlled component value tracking
+    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype, 'value'
+    )?.set;
+
+    if (!nativeInputValueSetter) {
+      result.phase = 'native_setter';
+      result.error = 'Could not get native input value setter';
+      window.__popcornLoginResult = result;
+      return;
+    }
+
+    // Fill username
+    usernameEl.focus();
+    nativeInputValueSetter.call(usernameEl, ${JSON.stringify(username)});
+    usernameEl.dispatchEvent(new Event('input', { bubbles: true }));
+    usernameEl.dispatchEvent(new Event('change', { bubbles: true }));
+    LOG('Username filled: ' + usernameEl.value);
+
+    // Small delay for React state update
+    await new Promise(r => setTimeout(r, 100));
+
+    // Fill password
+    passwordEl.focus();
+    nativeInputValueSetter.call(passwordEl, ${JSON.stringify(password)});
+    passwordEl.dispatchEvent(new Event('input', { bubbles: true }));
+    passwordEl.dispatchEvent(new Event('change', { bubbles: true }));
+    LOG('Password filled: ' + passwordEl.value);
+
+    // Wait for React to process state updates
+    await new Promise(r => setTimeout(r, 200));
+
+    // Verify values stuck
+    LOG('Verify - username: "' + usernameEl.value + '" password length: ' + passwordEl.value.length);
+
+    if (!usernameEl.value || !passwordEl.value) {
+      result.phase = 'verify_fill';
+      result.error = 'Values did not persist after fill';
+      window.__popcornLoginResult = result;
+      return;
+    }
+
+    // Submit: try form.submit events first, then click
+    const form = submitEl?.closest('form') || usernameEl.closest('form');
+    if (form) {
+      LOG('Found form, dispatching submit event');
+      const submitEvent = new Event('submit', { bubbles: true, cancelable: true });
+      form.dispatchEvent(submitEvent);
+    }
+
+    // Also click the submit button as backup
+    if (submitEl) {
+      await new Promise(r => setTimeout(r, 100));
+      LOG('Clicking submit button');
+      submitEl.click();
+    }
+
+    result.success = true;
+    result.phase = 'complete';
+    LOG('Login script complete');
+  } catch (err) {
+    result.phase = 'exception';
+    result.error = String(err);
+    LOG('Error: ' + err);
+  }
+
+  window.__popcornLoginResult = result;
+})();
+`;
+  document.documentElement.appendChild(script);
+  // Clean up the script tag
+  script.remove();
+}
 
 /**
  * Detects login form elements on the current page.
