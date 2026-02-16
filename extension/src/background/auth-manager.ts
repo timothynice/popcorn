@@ -135,21 +135,20 @@ export class AuthManager {
       return { success: true, finalUrl: tab.url || '' };
     }
 
-    // Inject the auto-login script
+    // Step 1: Fill credentials (separate from submit so React can process state)
     try {
-      const results = await chrome.scripting.executeScript({
+      const fillResults = await chrome.scripting.executeScript({
         target: { tabId },
-        func: performAutoLogin,
+        func: performFillCredentials,
         args: [
           settings.username,
           settings.password,
           loginCheck.usernameSelector,
           loginCheck.passwordSelector,
-          loginCheck.submitSelector,
         ],
       });
 
-      const fillResult = results?.[0]?.result as { filled: boolean; error?: string } | undefined;
+      const fillResult = fillResults?.[0]?.result as { filled: boolean; error?: string } | undefined;
       if (!fillResult?.filled) {
         return {
           success: false,
@@ -163,6 +162,19 @@ export class AuthManager {
         finalUrl: '',
         error: err instanceof Error ? err.message : String(err),
       };
+    }
+
+    // Step 2: Wait for React to process the filled values, then click submit
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        func: performClickSubmit,
+        args: [loginCheck.submitSelector],
+      });
+    } catch {
+      // Submit click failed — still try to detect redirect in case form auto-submitted
     }
 
     // Wait for navigation away from login page (poll up to 10s)
@@ -204,9 +216,27 @@ export class AuthManager {
           }
         });
 
-        // Also check that the page has a password field (some apps stay on same URL)
         if (!stillOnLogin) {
+          console.log(`[Popcorn] Login redirect detected: ${tabUrl}`);
           return tabUrl;
+        }
+
+        // Also check if the password field has disappeared (some apps
+        // show a loading state or redirect client-side on the same URL)
+        try {
+          const results = await chrome.scripting.executeScript({
+            target: { tabId },
+            func: () => !document.querySelector('input[type="password"]'),
+          });
+          if (results?.[0]?.result) {
+            console.log(`[Popcorn] Login form disappeared, assuming redirect: ${tabUrl}`);
+            // Wait a moment for the URL to update after client-side nav
+            await new Promise((resolve) => setTimeout(resolve, 500));
+            const updatedTab = await chrome.tabs.get(tabId);
+            return updatedTab.url || tabUrl;
+          }
+        } catch {
+          // Script injection failed; continue polling
         }
       } catch {
         // Tab may have been closed
@@ -314,15 +344,15 @@ function detectLoginFormElements(): LoginPageCheck {
 }
 
 /**
- * Fills login credentials and clicks submit.
+ * Fills login credentials (without submitting).
+ * Split from submit so React can process state updates before click.
  * Injected via chrome.scripting.executeScript.
  */
-function performAutoLogin(
+function performFillCredentials(
   username: string,
   password: string,
   usernameSel: string | null,
   passwordSel: string | null,
-  submitSel: string | null,
 ): { filled: boolean; error?: string } {
   // -- inline helpers (must be inside injected function) --
 
@@ -360,25 +390,6 @@ function performAutoLogin(
     return null;
   }
 
-  function _findSubmitButton(nearElement: HTMLElement): HTMLElement | null {
-    const form = nearElement.closest('form');
-    const container = form || document.body;
-    const selectors = [
-      'button[type="submit"]', 'input[type="submit"]',
-      'button:not([type="button"]):not([type="reset"])',
-    ];
-    for (const sel of selectors) {
-      const el = container.querySelector(sel) as HTMLElement;
-      if (el) return el;
-    }
-    const buttons = container.querySelectorAll('button, [role="button"]');
-    const loginTerms = /log\s*in|sign\s*in|submit|enter|continue/i;
-    for (const btn of buttons) {
-      if (loginTerms.test(btn.textContent || '')) return btn as HTMLElement;
-    }
-    return null;
-  }
-
   // -- main logic --
 
   try {
@@ -401,23 +412,61 @@ function performAutoLogin(
     _fillInput(usernameEl, username);
     _fillInput(passwordEl, password);
 
-    const submitEl = submitSel
-      ? (document.querySelector(submitSel) as HTMLElement)
-      : _findSubmitButton(passwordEl);
-
-    if (submitEl) {
-      submitEl.click();
-    } else {
-      const form = passwordEl.closest('form');
-      if (form) {
-        form.submit();
-      } else {
-        return { filled: false, error: 'Submit button not found' };
-      }
-    }
-
     return { filled: true };
   } catch (err) {
     return { filled: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
+ * Clicks the submit button on the login form.
+ * Injected via chrome.scripting.executeScript after a delay from filling.
+ */
+function performClickSubmit(
+  submitSel: string | null,
+): { clicked: boolean; error?: string } {
+  // -- inline helpers (must be inside injected function) --
+
+  function _findSubmitButton(nearElement: HTMLElement): HTMLElement | null {
+    const form = nearElement.closest('form');
+    const container = form || document.body;
+    const selectors = [
+      'button[type="submit"]', 'input[type="submit"]',
+      'button:not([type="button"]):not([type="reset"])',
+    ];
+    for (const sel of selectors) {
+      const el = container.querySelector(sel) as HTMLElement;
+      if (el) return el;
+    }
+    const buttons = container.querySelectorAll('button, [role="button"]');
+    const loginTerms = /log\s*in|sign\s*in|submit|enter|continue/i;
+    for (const btn of buttons) {
+      if (loginTerms.test(btn.textContent || '')) return btn as HTMLElement;
+    }
+    return null;
+  }
+
+  try {
+    const passwordEl = document.querySelector('input[type="password"]') as HTMLElement;
+
+    const submitEl = submitSel
+      ? (document.querySelector(submitSel) as HTMLElement)
+      : (passwordEl ? _findSubmitButton(passwordEl) : null);
+
+    if (submitEl) {
+      submitEl.click();
+      return { clicked: true };
+    }
+
+    // Fallback: submit the form directly
+    const form = passwordEl?.closest('form');
+    if (form) {
+      form.requestSubmit(); // requestSubmit triggers onSubmit handlers (unlike form.submit())
+      return { clicked: true };
+    }
+
+    return { clicked: false, error: 'Submit button not found' };
+  } catch (err) {
+    return { clicked: false, error: err instanceof Error ? err.message : String(err) };
   }
 }
