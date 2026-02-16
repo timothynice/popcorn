@@ -17,6 +17,7 @@ const chromeMock = {
   },
   tabs: {
     get: vi.fn(() => Promise.resolve({ url: 'http://localhost:3000/login' })),
+    sendMessage: vi.fn(() => Promise.resolve({ results: [{ passed: true }] })),
   },
   scripting: {
     executeScript: vi.fn(() => Promise.resolve([{
@@ -83,7 +84,6 @@ describe('AuthManager', () => {
 
       expect(settings.enabled).toBe(true);
       expect(settings.username).toBe('user');
-      // Default values should fill in missing fields
       expect(settings.password).toBe('');
       expect(settings.loginPatterns.length).toBeGreaterThan(0);
     });
@@ -115,8 +115,6 @@ describe('AuthManager', () => {
           submitSelector: 'button[type="submit"]',
         },
       }]);
-
-      // Need to set up stored settings with loginPatterns
       chromeMock.storage.local.get.mockResolvedValueOnce({
         popcorn_auth_settings: {
           enabled: true,
@@ -178,7 +176,6 @@ describe('AuthManager', () => {
     });
 
     it('succeeds when not on a login page', async () => {
-      // First call: getSettings
       chromeMock.storage.local.get.mockResolvedValueOnce({
         popcorn_auth_settings: {
           enabled: true,
@@ -187,7 +184,6 @@ describe('AuthManager', () => {
           loginPatterns: ['/login'],
         },
       });
-      // Second call: isLoginPage -> getSettings
       chromeMock.storage.local.get.mockResolvedValueOnce({
         popcorn_auth_settings: {
           enabled: true,
@@ -213,7 +209,7 @@ describe('AuthManager', () => {
       expect(result.finalUrl).toBe('http://localhost:3000/dashboard');
     });
 
-    it('fills credentials and clicks submit on login page', async () => {
+    it('uses content script to fill and click on login page', async () => {
       const authSettings = {
         enabled: true,
         username: 'test@example.com',
@@ -230,57 +226,58 @@ describe('AuthManager', () => {
         popcorn_auth_settings: authSettings,
       });
 
-      // Tab starts on login page
-      chromeMock.tabs.get.mockResolvedValue({ url: 'http://localhost:3000/login' });
-
-      // Call sequence for executeScript:
-      // 1. detectLoginFormElements (isLoginPage)
-      // 2. performFillCredentials
-      // 3. performVerifyFormReady
-      // 4. performClickSubmit
-      // 5+ waitForLoginRedirect polls (password field check)
-      chromeMock.scripting.executeScript
-        // 1. detectLoginFormElements
-        .mockResolvedValueOnce([{
-          result: {
-            isLogin: true,
-            usernameSelector: '#email',
-            passwordSelector: '#password',
-            submitSelector: 'button[type="submit"]',
-          },
-        }])
-        // 2. performFillCredentials
-        .mockResolvedValueOnce([{
-          result: { filled: true, usernameVerified: true, passwordVerified: true },
-        }])
-        // 3. performVerifyFormReady
-        .mockResolvedValueOnce([{
-          result: { ready: true, reason: 'all_ready' },
-        }])
-        // 4. performClickSubmit
-        .mockResolvedValueOnce([{
-          result: { clicked: true, method: 'simulateClick' },
-        }])
-        // 5. waitForLoginRedirect: password field check (still present)
-        .mockResolvedValueOnce([{ result: false }]);
-
-      // After submit, URL changes on second poll
+      // Tab starts on login page, then redirects
       chromeMock.tabs.get
         .mockResolvedValueOnce({ url: 'http://localhost:3000/login' }) // isLoginPage
-        .mockResolvedValueOnce({ url: 'http://localhost:3000/login' }) // autoLogin not-on-login check (unused, tabs.get returns login)
-        .mockResolvedValueOnce({ url: 'http://localhost:3000/dashboard' }); // redirect poll
+        .mockResolvedValue({ url: 'http://localhost:3000/dashboard' }); // redirect detected
+
+      // detectLoginFormElements
+      chromeMock.scripting.executeScript.mockResolvedValueOnce([{
+        result: {
+          isLogin: true,
+          usernameSelector: '#email',
+          passwordSelector: '#password',
+          submitSelector: 'button[type="submit"]',
+        },
+      }]);
+
+      // Content script ping (not loaded) — triggers injection
+      chromeMock.tabs.sendMessage
+        .mockRejectedValueOnce(new Error('No content script')) // ping fails
+        .mockResolvedValueOnce({ results: [{ passed: true }] }) // fill username
+        .mockResolvedValueOnce({ results: [{ passed: true }] }) // fill password
+        .mockResolvedValueOnce({ results: [{ passed: true }] }); // click submit
+
+      // Content script injection
+      chromeMock.scripting.executeScript.mockResolvedValueOnce([{}]);
 
       const result = await authManager.autoLogin(1);
 
       expect(result.success).toBe(true);
       expect(result.finalUrl).toBe('http://localhost:3000/dashboard');
 
-      // Verify executeScript was called for fill, readiness, and submit
-      const executeScriptCalls = chromeMock.scripting.executeScript.mock.calls;
-      expect(executeScriptCalls.length).toBeGreaterThanOrEqual(4);
+      // Verify sendMessage was called for fill and click
+      const sendMessageCalls = chromeMock.tabs.sendMessage.mock.calls;
+      // ping + fill username + fill password + click submit = 4 calls
+      expect(sendMessageCalls.length).toBe(4);
+
+      // Verify fill username
+      const fillUserMsg = sendMessageCalls[1][1];
+      expect(fillUserMsg.type).toBe('execute_plan');
+      expect(fillUserMsg.payload.steps[0].action).toBe('fill');
+      expect(fillUserMsg.payload.steps[0].value).toBe('test@example.com');
+
+      // Verify fill password
+      const fillPassMsg = sendMessageCalls[2][1];
+      expect(fillPassMsg.payload.steps[0].action).toBe('fill');
+
+      // Verify click
+      const clickMsg = sendMessageCalls[3][1];
+      expect(clickMsg.payload.steps[0].action).toBe('click');
+      expect(clickMsg.payload.steps[0].selector).toBe('button[type="submit"]');
     });
 
-    it('returns error when fill fails', async () => {
+    it('returns error when fill fails', { timeout: 15000 }, async () => {
       const authSettings = {
         enabled: true,
         username: 'test@example.com',
@@ -295,10 +292,11 @@ describe('AuthManager', () => {
         popcorn_auth_settings: authSettings,
       });
 
+      // Stays on login page (fill/click fails)
       chromeMock.tabs.get.mockResolvedValue({ url: 'http://localhost:3000/login' });
 
+      // detectLoginFormElements
       chromeMock.scripting.executeScript
-        // detectLoginFormElements
         .mockResolvedValueOnce([{
           result: {
             isLogin: true,
@@ -307,15 +305,23 @@ describe('AuthManager', () => {
             submitSelector: 'button[type="submit"]',
           },
         }])
-        // performFillCredentials — fails
-        .mockResolvedValueOnce([{
-          result: { filled: false, error: 'Username input not found' },
-        }]);
+        // content script injection
+        .mockResolvedValueOnce([{}])
+        // password field check (still present during redirect poll)
+        .mockResolvedValue([{ result: false }]);
+
+      // Content script ping succeeds (already loaded)
+      chromeMock.tabs.sendMessage
+        .mockResolvedValueOnce({ pong: true }) // ping
+        .mockRejectedValueOnce(new Error('Element not found')) // fill fails
+        .mockResolvedValueOnce({ results: [{ passed: true }] }) // fill password
+        .mockResolvedValueOnce({ results: [{ passed: true }] }); // click
 
       const result = await authManager.autoLogin(1);
 
+      // Still times out because login didn't actually work
       expect(result.success).toBe(false);
-      expect(result.error).toBe('Username input not found');
+      expect(result.error).toBe('Timed out waiting for login redirect');
     });
   });
 });
