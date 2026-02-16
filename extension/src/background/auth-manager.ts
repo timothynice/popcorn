@@ -126,7 +126,7 @@ export class AuthManager {
    * 2. The <script> tag runs in the MAIN world (it's a page script)
    * 3. The script uses React's internal nativeInputValueSetter to update
    *    controlled input values and trigger real React onChange handlers
-   * 4. Results are communicated via window.__popcornLoginResult (shared DOM)
+   * 4. Results are communicated via DOM attribute (data-popcorn-login-result)
    *
    * This approach is necessary because:
    * - chrome.scripting.executeScript with world:'MAIN' has been unreliable
@@ -168,7 +168,7 @@ export class AuthManager {
       console.warn('[Popcorn] Script injection failed:', err);
     }
 
-    // Wait for the injected script to finish (it sets window.__popcornLoginResult)
+    // Wait for the injected script to finish (it sets data-popcorn-login-result attr)
     // Poll for up to 5 seconds
     let loginResult: { success: boolean; phase: string; error?: string } | null = null;
     const pollStart = Date.now();
@@ -385,12 +385,13 @@ function injectLoginScript(
     LOG('Error: ' + err);
   }
 
-  window.__popcornLoginResult = result;
+  document.documentElement.setAttribute('data-popcorn-login-result', JSON.stringify(result));
 })();
 `;
   document.documentElement.appendChild(script);
-  // Clean up the script tag
-  script.remove();
+  // Don't remove immediately — the async IIFE needs time to execute.
+  // Clean up after a generous delay.
+  setTimeout(() => script.remove(), 5000);
 }
 
 /**
