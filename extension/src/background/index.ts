@@ -385,9 +385,11 @@ async function handleStartDemoMessage(
   const targetUrl = message.payload.testPlan.baseUrl;
 
   if (testPlanRoute) {
-    // Route discovered — navigate to baseUrl + route (e.g., http://localhost:3000/dashboard)
-    const fullUrl = targetUrl
-      ? new URL(testPlanRoute, targetUrl).href
+    // Route discovered — resolve against the current tab's origin (most reliable,
+    // since it reflects where the app is actually running) or fall back to baseUrl.
+    const baseForRoute = (currentIsHttp && currentUrl) ? currentUrl : targetUrl;
+    const fullUrl = baseForRoute
+      ? new URL(testPlanRoute, baseForRoute).href
       : testPlanRoute;
     console.log(`[Popcorn] Navigating to component route: ${fullUrl}`);
     await chrome.tabs.update(tabId, { url: fullUrl });
