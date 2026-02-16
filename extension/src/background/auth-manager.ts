@@ -136,6 +136,7 @@ export class AuthManager {
     }
 
     // Step 1: Fill credentials (separate from submit so React can process state)
+    console.log('[Popcorn] Auto-login step 1: filling credentials');
     try {
       const fillResults = await chrome.scripting.executeScript({
         target: { tabId },
@@ -148,7 +149,15 @@ export class AuthManager {
         ],
       });
 
-      const fillResult = fillResults?.[0]?.result as { filled: boolean; error?: string } | undefined;
+      const fillResult = fillResults?.[0]?.result as {
+        filled: boolean;
+        error?: string;
+        usernameVerified?: boolean;
+        passwordVerified?: boolean;
+      } | undefined;
+
+      console.log('[Popcorn] Fill result:', JSON.stringify(fillResult));
+
       if (!fillResult?.filled) {
         return {
           success: false,
@@ -157,29 +166,72 @@ export class AuthManager {
         };
       }
     } catch (err) {
-      return {
-        success: false,
-        finalUrl: '',
-        error: err instanceof Error ? err.message : String(err),
-      };
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error('[Popcorn] Fill threw error:', msg);
+      return { success: false, finalUrl: '', error: msg };
     }
 
-    // Step 2: Wait for React to process the filled values, then click submit.
-    // shadcn/Radix buttons may stay disabled until React state updates propagate.
-    await new Promise((resolve) => setTimeout(resolve, 800));
-
+    // Step 2: Poll until form is ready (inputs have values, button enabled)
+    console.log('[Popcorn] Auto-login step 2: waiting for form readiness');
     try {
-      await chrome.scripting.executeScript({
+      const readyResults = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: performVerifyFormReady,
+        args: [
+          loginCheck.usernameSelector,
+          loginCheck.passwordSelector,
+          loginCheck.submitSelector,
+          2000,
+        ],
+      });
+
+      const readyResult = readyResults?.[0]?.result as {
+        ready: boolean;
+        reason: string;
+        buttonDisabled?: boolean;
+        usernameEmpty?: boolean;
+        passwordEmpty?: boolean;
+      } | undefined;
+
+      console.log('[Popcorn] Form readiness:', JSON.stringify(readyResult));
+
+      if (!readyResult?.ready) {
+        console.warn('[Popcorn] Form not ready — proceeding anyway:', readyResult?.reason);
+      }
+    } catch (err) {
+      console.warn('[Popcorn] Readiness check failed, proceeding anyway:', err);
+    }
+
+    // Step 3: Click submit
+    console.log('[Popcorn] Auto-login step 3: clicking submit');
+    try {
+      const clickResults = await chrome.scripting.executeScript({
         target: { tabId },
         func: performClickSubmit,
         args: [loginCheck.submitSelector],
       });
-    } catch {
-      // Submit click failed — still try to detect redirect in case form auto-submitted
+
+      const clickResult = clickResults?.[0]?.result as {
+        clicked: boolean;
+        method?: string;
+        error?: string;
+      } | undefined;
+
+      console.log('[Popcorn] Click result:', JSON.stringify(clickResult));
+    } catch (err) {
+      console.warn('[Popcorn] Submit click threw:', err);
+      // Still try to detect redirect in case form auto-submitted
     }
 
-    // Wait for navigation away from login page (poll up to 10s)
+    // Step 4: Wait for navigation away from login page (poll up to 10s)
+    console.log('[Popcorn] Auto-login step 4: waiting for redirect');
     const finalUrl = await this.waitForLoginRedirect(tabId, settings.loginPatterns, 10000);
+
+    if (finalUrl) {
+      console.log(`[Popcorn] Auto-login succeeded, now at: ${finalUrl}`);
+    } else {
+      console.warn('[Popcorn] Auto-login timed out waiting for redirect');
+    }
 
     return {
       success: finalUrl !== null,
@@ -348,13 +400,16 @@ function detectLoginFormElements(): LoginPageCheck {
  * Fills login credentials (without submitting).
  * Split from submit so React can process state updates before click.
  * Injected via chrome.scripting.executeScript.
+ *
+ * Uses React's _valueTracker reset trick to ensure controlled components
+ * fire onChange even when the value is set programmatically.
  */
 function performFillCredentials(
   username: string,
   password: string,
   usernameSel: string | null,
   passwordSel: string | null,
-): { filled: boolean; error?: string } {
+): { filled: boolean; error?: string; usernameVerified?: boolean; passwordVerified?: boolean } {
   // -- inline helpers (must be inside injected function) --
 
   function _fillInput(el: HTMLInputElement, value: string): void {
@@ -362,6 +417,18 @@ function performFillCredentials(
     el.focus();
     el.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
     el.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+
+    // Reset React's internal value tracker so onChange fires.
+    // React 16+ attaches _valueTracker to controlled inputs. When an input
+    // event fires, React checks tracker.getValue() !== currentValue.
+    // If they match (because the native setter already updated the DOM),
+    // React suppresses onChange entirely. Resetting the tracker forces
+    // React to see a difference and fire the handler.
+    const tracker = (el as unknown as Record<string, unknown>)._valueTracker as
+      { setValue: (v: string) => void } | undefined;
+    if (tracker) {
+      tracker.setValue('');
+    }
 
     // Use the native setter to bypass React's synthetic event system
     const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
@@ -373,8 +440,13 @@ function performFillCredentials(
       el.value = value;
     }
 
-    // Fire the full event sequence React listens for
-    el.dispatchEvent(new Event('input', { bubbles: true }));
+    // Dispatch InputEvent (not plain Event) — this is what browsers fire for
+    // real keyboard input. React's onChange listens for this.
+    el.dispatchEvent(new InputEvent('input', {
+      bubbles: true,
+      inputType: 'insertText',
+      data: value,
+    }));
     el.dispatchEvent(new Event('change', { bubbles: true }));
 
     // Blur to trigger validation and ensure React processes the final value
@@ -424,22 +496,89 @@ function performFillCredentials(
     _fillInput(usernameEl, username);
     _fillInput(passwordEl, password);
 
-    return { filled: true };
+    // Verify the DOM values are actually set (read back)
+    const usernameVerified = usernameEl.value === username;
+    const passwordVerified = passwordEl.value === password;
+
+    return { filled: true, usernameVerified, passwordVerified };
   } catch (err) {
     return { filled: false, error: err instanceof Error ? err.message : String(err) };
   }
 }
 
 /**
- * Clicks the submit button on the login form.
- * Injected via chrome.scripting.executeScript after a delay from filling.
+ * Polls until the login form is ready for submission:
+ * - Input fields have non-empty values (React state has processed)
+ * - Submit button is not disabled
  *
- * Uses multiple click strategies because UI frameworks (shadcn, Radix, MUI)
- * sometimes intercept or delegate events in ways that `.click()` alone misses.
+ * Injected via chrome.scripting.executeScript.
+ * Returns a promise that resolves when ready or on timeout.
+ */
+function performVerifyFormReady(
+  usernameSel: string | null,
+  passwordSel: string | null,
+  submitSel: string | null,
+  timeoutMs: number,
+): Promise<{
+  ready: boolean;
+  reason: string;
+  buttonDisabled?: boolean;
+  usernameEmpty?: boolean;
+  passwordEmpty?: boolean;
+}> {
+  return new Promise((resolve) => {
+    const start = Date.now();
+
+    const poll = (): void => {
+      const usernameEl = usernameSel
+        ? (document.querySelector(usernameSel) as HTMLInputElement)
+        : (document.querySelector('input[type="email"], input[name="email"], input[name="username"]') as HTMLInputElement);
+      const passwordEl = passwordSel
+        ? (document.querySelector(passwordSel) as HTMLInputElement)
+        : (document.querySelector('input[type="password"]') as HTMLInputElement);
+      const submitEl = submitSel
+        ? (document.querySelector(submitSel) as HTMLButtonElement)
+        : (document.querySelector('button[type="submit"]') as HTMLButtonElement);
+
+      const usernameHasValue = usernameEl != null && usernameEl.value.length > 0;
+      const passwordHasValue = passwordEl != null && passwordEl.value.length > 0;
+      const buttonEnabled = submitEl != null && !submitEl.disabled;
+
+      if (usernameHasValue && passwordHasValue && buttonEnabled) {
+        resolve({ ready: true, reason: 'all_ready' });
+        return;
+      }
+
+      if (Date.now() - start >= timeoutMs) {
+        resolve({
+          ready: false,
+          reason: 'timeout',
+          buttonDisabled: submitEl ? submitEl.disabled : true,
+          usernameEmpty: !usernameHasValue,
+          passwordEmpty: !passwordHasValue,
+        });
+        return;
+      }
+
+      setTimeout(poll, 50);
+    };
+
+    poll();
+  });
+}
+
+/**
+ * Clicks the submit button on the login form.
+ * Injected via chrome.scripting.executeScript after readiness verification.
+ *
+ * Uses a full pointer/mouse event sequence that works with UI frameworks
+ * like shadcn, Radix, and MUI. Does NOT also call form.requestSubmit()
+ * to avoid double-submission — for a submit button inside a form, the
+ * click event already triggers the form's onSubmit handler.
  */
 function performClickSubmit(
   submitSel: string | null,
-): { clicked: boolean; error?: string } {
+): { clicked: boolean; method?: string; error?: string } {
   // -- inline helpers (must be inside injected function) --
 
   function _findSubmitButton(nearElement: HTMLElement): HTMLElement | null {
@@ -489,35 +628,24 @@ function performClickSubmit(
       : (passwordEl ? _findSubmitButton(passwordEl) : null);
 
     if (submitEl) {
-      // Remove disabled attribute if present (React may re-enable it on next
-      // tick but some frameworks leave it stale after programmatic fills)
+      // Force-enable if disabled (React may not have re-enabled after state update)
       if ((submitEl as HTMLButtonElement).disabled) {
         (submitEl as HTMLButtonElement).disabled = false;
       }
 
-      // Strategy 1: Full pointer/mouse event sequence (works with most UI libs)
+      // Full pointer/mouse event sequence — this triggers form onSubmit
+      // for submit buttons. Do NOT also call requestSubmit(), which would
+      // fire a second submit event and cause double-submission.
       _simulateClick(submitEl);
 
-      // Strategy 2: Also try form.requestSubmit(button) which faithfully
-      // simulates a submit-button click including onSubmit handlers
-      const form = submitEl.closest('form');
-      if (form) {
-        try {
-          form.requestSubmit(submitEl as HTMLButtonElement);
-        } catch {
-          // requestSubmit with param may throw if button isn't a submit button
-          try { form.requestSubmit(); } catch { /* ignore */ }
-        }
-      }
-
-      return { clicked: true };
+      return { clicked: true, method: 'simulateClick' };
     }
 
-    // Fallback: submit the form directly
+    // Fallback: no submit button found, try form.requestSubmit directly
     const form = passwordEl?.closest('form');
     if (form) {
       form.requestSubmit();
-      return { clicked: true };
+      return { clicked: true, method: 'formRequestSubmit' };
     }
 
     return { clicked: false, error: 'Submit button not found' };
