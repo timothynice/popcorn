@@ -24,6 +24,14 @@ export function SettingsPanel({
   const [baseUrlValue, setBaseUrlValue] = useState('');
   const [navigateBackEnabled, setNavigateBackEnabled] = useState(true);
   const [loadingNavigateBack, setLoadingNavigateBack] = useState(true);
+  const [authEnabled, setAuthEnabled] = useState(false);
+  const [authUsername, setAuthUsername] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [authPatterns, setAuthPatterns] = useState<string[]>(['/login', '/signin', '/auth', '/sign-in', '/log-in']);
+  const [newPattern, setNewPattern] = useState('');
+  const [authDirty, setAuthDirty] = useState(false);
+  const [authSaving, setAuthSaving] = useState(false);
+  const [authLoaded, setAuthLoaded] = useState(false);
 
   useEffect(() => {
     chrome.runtime.sendMessage({ type: 'get_tape_count' })
@@ -71,6 +79,56 @@ export function SettingsPanel({
         setLoadingNavigateBack(false);
       });
   }, []);
+
+  useEffect(() => {
+    chrome.runtime.sendMessage({ type: 'get_auth_settings' })
+      .then((response) => {
+        if (response?.success && response.settings) {
+          setAuthEnabled(response.settings.enabled ?? false);
+          setAuthUsername(response.settings.username ?? '');
+          setAuthPassword(response.settings.password ?? '');
+          if (response.settings.loginPatterns?.length) {
+            setAuthPatterns(response.settings.loginPatterns);
+          }
+        }
+      })
+      .catch(() => {})
+      .finally(() => setAuthLoaded(true));
+  }, []);
+
+  const handleSaveAuth = async () => {
+    setAuthSaving(true);
+    try {
+      await chrome.runtime.sendMessage({
+        type: 'save_auth_settings',
+        payload: {
+          enabled: authEnabled,
+          username: authUsername,
+          password: authPassword,
+          loginPatterns: authPatterns,
+        },
+      });
+      setAuthDirty(false);
+    } catch {
+      // ignore
+    } finally {
+      setAuthSaving(false);
+    }
+  };
+
+  const handleAddPattern = () => {
+    const trimmed = newPattern.trim();
+    if (trimmed && !authPatterns.includes(trimmed)) {
+      setAuthPatterns([...authPatterns, trimmed]);
+      setNewPattern('');
+      setAuthDirty(true);
+    }
+  };
+
+  const handleRemovePattern = (pattern: string) => {
+    setAuthPatterns(authPatterns.filter((p) => p !== pattern));
+    setAuthDirty(true);
+  };
 
   const getStatusLabel = () => {
     switch (status) {
@@ -208,6 +266,91 @@ export function SettingsPanel({
             )}
           </section>
         )}
+
+        {/* Authentication */}
+        <section className={styles.section}>
+          <h3 className={styles.sectionTitle}>Authentication</h3>
+          <div className={styles.behaviorRow}>
+            <label className={styles.toggleLabel}>
+              <input
+                type="checkbox"
+                className={styles.toggleCheckbox}
+                checked={authEnabled}
+                disabled={!authLoaded}
+                onChange={(e) => { setAuthEnabled(e.target.checked); setAuthDirty(true); }}
+              />
+              <span className={styles.toggleText}>Auto-login on test pages</span>
+            </label>
+          </div>
+
+          {authEnabled && (
+            <>
+              <div className={styles.authFieldGroup}>
+                <label className={styles.authFieldLabel}>Username / Email</label>
+                <input
+                  type="text"
+                  className={styles.authInput}
+                  value={authUsername}
+                  onChange={(e) => { setAuthUsername(e.target.value); setAuthDirty(true); }}
+                  placeholder="test@example.com"
+                  autoComplete="off"
+                />
+              </div>
+
+              <div className={styles.authFieldGroup}>
+                <label className={styles.authFieldLabel}>Password</label>
+                <input
+                  type="password"
+                  className={styles.authInput}
+                  value={authPassword}
+                  onChange={(e) => { setAuthPassword(e.target.value); setAuthDirty(true); }}
+                  placeholder="test password"
+                  autoComplete="off"
+                />
+              </div>
+
+              <div className={styles.authFieldGroup}>
+                <label className={styles.authFieldLabel}>Login URL Patterns</label>
+                <div className={styles.authPatterns}>
+                  {authPatterns.map((pattern) => (
+                    <span key={pattern} className={styles.patternTag}>
+                      {pattern}
+                      <button
+                        className={styles.patternRemove}
+                        onClick={() => handleRemovePattern(pattern)}
+                        aria-label={`Remove ${pattern}`}
+                      >
+                        {'\u00d7'}
+                      </button>
+                    </span>
+                  ))}
+                  <input
+                    type="text"
+                    className={styles.patternInput}
+                    value={newPattern}
+                    onChange={(e) => setNewPattern(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleAddPattern(); } }}
+                    placeholder="/custom-login"
+                  />
+                </div>
+              </div>
+
+              <p className={styles.authHint}>
+                For development/test credentials only. Stored locally in Chrome.
+              </p>
+
+              <div className={styles.authActions}>
+                <button
+                  className={styles.saveButton}
+                  onClick={handleSaveAuth}
+                  disabled={authSaving || !authDirty}
+                >
+                  {authSaving ? 'Saving...' : 'Save'}
+                </button>
+              </div>
+            </>
+          )}
+        </section>
 
         {/* Storage */}
         <section className={styles.section}>

@@ -289,3 +289,99 @@
   line-height: 1.5;
   padding-left: 24px;
 }
+
+/* ---- Authentication ---- */
+
+.authFieldGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.authFieldLabel {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.authInput {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  padding: 6px 8px;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.authInput:focus {
+  border-color: var(--accent-blue);
+}
+
+.authPatterns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.patternTag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-primary);
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
+  padding: 2px 6px;
+}
+
+.patternRemove {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0;
+  line-height: 1;
+  transition: color 0.15s ease;
+}
+
+.patternRemove:hover {
+  color: var(--accent-red);
+}
+
+.patternInput {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
+  padding: 2px 6px;
+  outline: none;
+  width: 100px;
+  transition: border-color 0.15s ease;
+}
+
+.patternInput:focus {
+  border-color: var(--accent-blue);
+}
+
+.authHint {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  color: var(--text-muted);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.authActions {
+  display: flex;
+  gap: 8px;
+}

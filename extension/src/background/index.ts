@@ -10,6 +10,7 @@ import { isPopcornMessage, createMessage } from '@popcorn/shared';
 import { initExternalMessaging } from './external-messaging.js';
 import { initBridgePolling, isHookConnected, discoverHookPort } from './bridge-client.js';
 import { runFullDemo, runExplorationDemo, reloadTab } from './demo-flow.js';
+import { AuthManager } from './auth-manager.js';
 import type { ExplorationPlan } from '@popcorn/shared';
 import { captureScreenshot } from '../capture/screenshot.js';
 import { TapeStore } from '../storage/tape-store.js';
@@ -180,6 +181,27 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           .then((plan) => sendResponse({ success: true, plan }))
           .catch((err) => sendResponse({ success: false, error: err instanceof Error ? err.message : String(err) }));
         return true;
+      case 'get_auth_settings':
+        new AuthManager().getSettings()
+          .then((settings) => sendResponse({ success: true, settings }))
+          .catch((err) => sendResponse({ success: false, error: err instanceof Error ? err.message : String(err) }));
+        return true;
+      case 'save_auth_settings':
+        new AuthManager().saveSettings(message.payload)
+          .then(() => sendResponse({ success: true }))
+          .catch((err) => sendResponse({ success: false, error: err instanceof Error ? err.message : String(err) }));
+        return true;
+      case 'test_auth': {
+        const testTabPromise = chrome.tabs.query({ active: true, currentWindow: true });
+        testTabPromise
+          .then(async (testTabs) => {
+            if (!testTabs[0]?.id) throw new Error('No active tab');
+            const result = await new AuthManager().isLoginPage(testTabs[0].id);
+            sendResponse({ success: true, result });
+          })
+          .catch((err) => sendResponse({ success: false, error: err instanceof Error ? err.message : String(err) }));
+        return true;
+      }
       case 'step_progress':
         // Relay progress from content script to popup
         chrome.runtime.sendMessage({
@@ -368,6 +390,32 @@ async function handleStartDemoMessage(
   } else {
     broadcastStatus('error', 'No web page open — open your app or set baseUrl in popcorn.config.json');
     throw new Error('No web page open and no valid baseUrl configured');
+  }
+
+  // Auth pre-flight: if credentials are configured, check if we're on a login page
+  // and auto-login before running the demo.
+  try {
+    const authManager = new AuthManager();
+    const authSettings = await authManager.getSettings();
+    if (authSettings.enabled && authSettings.username && authSettings.password) {
+      const loginCheck = await authManager.isLoginPage(tabId);
+      if (loginCheck.isLogin) {
+        console.log('[Popcorn] Login page detected, attempting auto-login');
+        const loginResult = await authManager.autoLogin(tabId);
+        if (!loginResult.success) {
+          console.warn('[Popcorn] Auto-login failed:', loginResult.error);
+          broadcastStatus('error', 'Auto-login failed. Please log in manually.');
+          throw new Error(`Auto-login failed: ${loginResult.error}`);
+        }
+        console.log(`[Popcorn] Auto-login succeeded, now at ${loginResult.finalUrl}`);
+      }
+    }
+  } catch (authErr) {
+    if (authErr instanceof Error && authErr.message.startsWith('Auto-login failed:')) {
+      throw authErr;
+    }
+    // Non-fatal: log and continue with the demo
+    console.warn('[Popcorn] Auth pre-flight check failed:', authErr);
   }
 
   try {
