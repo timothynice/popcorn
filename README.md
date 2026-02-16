@@ -12,7 +12,6 @@
 
 > **Problem Statement #1: Build a Tool That Should Exist** — AI writes frontend code blind. Popcorn gives it eyes.
 
-[▶ Demo Video](link-to-video)
 
 ---
 
