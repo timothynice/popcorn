@@ -66,6 +66,8 @@ export interface TestPlan {
   description?: string;
   assumptions?: string[];
   baseUrl?: string;
+  /** Component route path auto-discovered from import graph (e.g., "/dashboard"). */
+  route?: string;
   steps: TestStep[];
   tags?: string[];
   estimatedDuration?: string;

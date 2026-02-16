@@ -421,6 +421,58 @@ export function resolveNavigationSteps(
   return [];
 }
 
+// ── findRouteForComponent ───────────────────────────────────────────
+
+const MAX_ROUTE_DEPTH = 5;
+
+/**
+ * Recursively walks the import chain from `filePath` upward to find the
+ * route where the component is rendered. At each level, checks whether
+ * the importer renders the component inside a React Router `<Route>`.
+ *
+ * Returns the route path (e.g., "/dashboard") or null if no route is found
+ * within MAX_ROUTE_DEPTH levels.
+ */
+export async function findRouteForComponent(
+  filePath: string,
+  projectRoot: string,
+  visited: Set<string> = new Set(),
+  depth: number = 0,
+): Promise<string | null> {
+  if (depth >= MAX_ROUTE_DEPTH) return null;
+
+  const resolvedPath = path.resolve(filePath);
+  if (visited.has(resolvedPath)) return null; // Prevent cycles
+  visited.add(resolvedPath);
+
+  const componentName = path.basename(filePath, path.extname(filePath));
+  const escaped = escapeRegex(componentName);
+
+  const importers = await findImporters(filePath, projectRoot);
+  if (importers.length === 0) return null;
+
+  // Check each importer for a route rendering of this component
+  for (const importer of importers) {
+    const routeHint = detectRouteRendering(importer.source, escaped);
+    if (routeHint && routeHint.type === 'route') {
+      return routeHint.path;
+    }
+  }
+
+  // No route found at this level — recurse into each importer
+  for (const importer of importers) {
+    const route = await findRouteForComponent(
+      importer.filePath,
+      projectRoot,
+      visited,
+      depth + 1,
+    );
+    if (route) return route;
+  }
+
+  return null;
+}
+
 // ── analyzeComponentContext ──────────────────────────────────────────
 
 /**

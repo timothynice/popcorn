@@ -8,6 +8,7 @@ import {
   detectNavigationControl,
   resolveNavigationSteps,
   analyzeComponentContext,
+  findRouteForComponent,
 } from '../import-graph.js';
 import type { NavigationHint, NavigationControl } from '../import-graph.js';
 
@@ -557,5 +558,203 @@ export default function App() {
     expect(ctx!.navigationSteps).toHaveLength(1);
     expect(ctx!.navigationSteps[0].action).toBe('navigate');
     expect(ctx!.navigationSteps[0].target).toBe('http://localhost:3000/product');
+  });
+});
+
+// ── findRouteForComponent ──────────────────────────────────────────
+
+describe('findRouteForComponent', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'popcorn-route-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('finds route one level up (direct parent has Route)', async () => {
+    const pagesDir = path.join(tmpDir, 'pages');
+    await fs.mkdir(pagesDir, { recursive: true });
+
+    // Target component
+    const targetPath = path.join(pagesDir, 'Dashboard.tsx');
+    await fs.writeFile(
+      targetPath,
+      `export default function Dashboard() { return <div>Dashboard</div>; }`,
+    );
+
+    // App.tsx with route
+    await fs.writeFile(
+      path.join(tmpDir, 'App.tsx'),
+      `import Dashboard from './pages/Dashboard';
+import { Route, Routes } from 'react-router-dom';
+
+export default function App() {
+  return (
+    <Routes>
+      <Route path="/dashboard" element={<Dashboard />} />
+    </Routes>
+  );
+}`,
+    );
+
+    const route = await findRouteForComponent(targetPath, tmpDir);
+    expect(route).toBe('/dashboard');
+  });
+
+  it('finds route two levels up (nested component → page → route)', async () => {
+    const componentsDir = path.join(tmpDir, 'components');
+    await fs.mkdir(componentsDir, { recursive: true });
+
+    // Target: DashboardCard.tsx (leaf component)
+    const targetPath = path.join(componentsDir, 'DashboardCard.tsx');
+    await fs.writeFile(
+      targetPath,
+      `export default function DashboardCard() { return <div>Card</div>; }`,
+    );
+
+    // Dashboard.tsx imports DashboardCard
+    const dashboardPath = path.join(tmpDir, 'Dashboard.tsx');
+    await fs.writeFile(
+      dashboardPath,
+      `import DashboardCard from './components/DashboardCard';
+export default function Dashboard() { return <DashboardCard />; }`,
+    );
+
+    // App.tsx has route for Dashboard
+    await fs.writeFile(
+      path.join(tmpDir, 'App.tsx'),
+      `import Dashboard from './Dashboard';
+import { Route, Routes } from 'react-router-dom';
+
+export default function App() {
+  return (
+    <Routes>
+      <Route path="/dashboard" element={<Dashboard />} />
+    </Routes>
+  );
+}`,
+    );
+
+    const route = await findRouteForComponent(targetPath, tmpDir);
+    expect(route).toBe('/dashboard');
+  });
+
+  it('finds route three levels up (deeply nested)', async () => {
+    const uiDir = path.join(tmpDir, 'ui');
+    const dashDir = path.join(tmpDir, 'dashboard');
+    const pagesDir = path.join(tmpDir, 'pages');
+    await fs.mkdir(uiDir, { recursive: true });
+    await fs.mkdir(dashDir, { recursive: true });
+    await fs.mkdir(pagesDir, { recursive: true });
+
+    // Target: Card.tsx (ui primitive)
+    const targetPath = path.join(uiDir, 'Card.tsx');
+    await fs.writeFile(targetPath, `export function Card() { return <div />; }`);
+
+    // DashboardCard imports Card
+    await fs.writeFile(
+      path.join(dashDir, 'DashboardCard.tsx'),
+      `import { Card } from '../ui/Card';
+export function DashboardCard() { return <Card />; }`,
+    );
+
+    // DashboardPage imports DashboardCard
+    await fs.writeFile(
+      path.join(pagesDir, 'DashboardPage.tsx'),
+      `import { DashboardCard } from '../dashboard/DashboardCard';
+export default function DashboardPage() { return <DashboardCard />; }`,
+    );
+
+    // App.tsx has route for DashboardPage
+    await fs.writeFile(
+      path.join(tmpDir, 'App.tsx'),
+      `import DashboardPage from './pages/DashboardPage';
+import { Route, Routes } from 'react-router-dom';
+
+export default function App() {
+  return (
+    <Routes>
+      <Route path="/dashboard" element={<DashboardPage />} />
+    </Routes>
+  );
+}`,
+    );
+
+    const route = await findRouteForComponent(targetPath, tmpDir);
+    expect(route).toBe('/dashboard');
+  });
+
+  it('returns null when no route is found', async () => {
+    const targetPath = path.join(tmpDir, 'Orphan.tsx');
+    await fs.writeFile(targetPath, `export function Orphan() { return <div />; }`);
+
+    const route = await findRouteForComponent(targetPath, tmpDir);
+    expect(route).toBeNull();
+  });
+
+  it('handles circular imports without infinite loop', async () => {
+    // A imports B, B imports A — should not hang
+    const aPath = path.join(tmpDir, 'CompA.tsx');
+    const bPath = path.join(tmpDir, 'CompB.tsx');
+
+    await fs.writeFile(
+      aPath,
+      `import CompB from './CompB';
+export default function CompA() { return <CompB />; }`,
+    );
+    await fs.writeFile(
+      bPath,
+      `import CompA from './CompA';
+export default function CompB() { return <CompA />; }`,
+    );
+
+    const route = await findRouteForComponent(aPath, tmpDir);
+    expect(route).toBeNull();
+  });
+
+  it('respects depth limit', async () => {
+    // Create a chain deeper than MAX_ROUTE_DEPTH (5)
+    const dirs = ['a', 'b', 'c', 'd', 'e', 'f', 'g'];
+    for (const d of dirs) {
+      await fs.mkdir(path.join(tmpDir, d), { recursive: true });
+    }
+
+    // Target at the bottom
+    const targetPath = path.join(tmpDir, 'a', 'Leaf.tsx');
+    await fs.writeFile(targetPath, `export default function Leaf() { return <div />; }`);
+
+    // Chain: Leaf → L1 → L2 → L3 → L4 → L5 → App (with route)
+    const chainNames = ['L1', 'L2', 'L3', 'L4', 'L5'];
+    let prevName = 'Leaf';
+    let prevDir = 'a';
+    for (let i = 0; i < chainNames.length; i++) {
+      const name = chainNames[i];
+      const dir = dirs[i + 1];
+      await fs.writeFile(
+        path.join(tmpDir, dir, `${name}.tsx`),
+        `import ${prevName} from '../${prevDir}/${prevName}';
+export default function ${name}() { return <${prevName} />; }`,
+      );
+      prevName = name;
+      prevDir = dir;
+    }
+
+    // App.tsx at level 6 — beyond depth limit of 5
+    await fs.writeFile(
+      path.join(tmpDir, 'g', 'App.tsx'),
+      `import L5 from '../f/L5';
+import { Route, Routes } from 'react-router-dom';
+
+export default function App() {
+  return <Routes><Route path="/deep" element={<L5 />} /></Routes>;
+}`,
+    );
+
+    const route = await findRouteForComponent(targetPath, tmpDir);
+    // With depth limit of 5, it should not reach the route at level 6
+    expect(route).toBeNull();
   });
 });

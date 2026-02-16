@@ -13,7 +13,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { TestPlan, TestStep, DetectedElement } from '@popcorn/shared';
 import { buildSteps } from '@popcorn/shared';
-import { analyzeComponentContext } from './import-graph.js';
+import { analyzeComponentContext, findRouteForComponent } from './import-graph.js';
 
 // Re-export from shared for backward compatibility
 export type { DetectedElement } from '@popcorn/shared';
@@ -198,22 +198,33 @@ export async function generatePlanFromFile(
     }
   }
 
+  // Discover the route where this component is rendered by walking the
+  // import chain recursively (e.g., Card → DashboardCard → Dashboard → Route).
+  let route: string | undefined;
+  if (options?.projectRoot) {
+    const discovered = await findRouteForComponent(filePath, options.projectRoot);
+    if (discovered) {
+      route = discovered;
+    }
+  }
+
   // No interactive elements — generate a visual-check plan
   if (elements.length === 0) {
-    return buildVisualCheckPlan(filePath, planName, baseName, baseUrl, options?.projectRoot);
+    return buildVisualCheckPlan(filePath, planName, baseName, baseUrl, options?.projectRoot, route);
   }
 
   const steps = buildSteps(elements, baseUrl);
 
   if (steps.length <= 1) {
     // Only a navigate step — fall back to visual-check
-    return buildVisualCheckPlan(filePath, planName, baseName, baseUrl, options?.projectRoot);
+    return buildVisualCheckPlan(filePath, planName, baseName, baseUrl, options?.projectRoot, route);
   }
 
   return {
     planName,
     description: `Auto-generated test plan for ${baseName}`,
     baseUrl,
+    route,
     steps,
     tags: ['auto-generated'],
   };
@@ -229,6 +240,7 @@ async function buildVisualCheckPlan(
   baseName: string,
   baseUrl: string,
   projectRoot?: string,
+  route?: string,
 ): Promise<TestPlan> {
   const steps: TestStep[] = [];
   let tags = ['auto-generated', 'visual-check'];
@@ -291,6 +303,7 @@ async function buildVisualCheckPlan(
     planName,
     description: `Visual check for ${baseName}`,
     baseUrl,
+    route,
     steps,
     tags,
   };

@@ -377,12 +377,22 @@ async function handleStartDemoMessage(
   const currentUrl = tabs[0].url;
 
   // Decide whether to navigate:
-  // 1. If active tab is already on an http(s) page → run in place (no navigation needed)
-  // 2. If active tab is NOT on http(s) → navigate to the test plan's baseUrl as fallback
+  // 1. If test plan has a `route` (auto-discovered from import graph) → always navigate there
+  // 2. If no route and active tab is already on http(s) → run in place
+  // 3. If no route and active tab is NOT on http(s) → navigate to baseUrl as fallback
   const currentIsHttp = currentUrl?.startsWith('http://') || currentUrl?.startsWith('https://');
+  const testPlanRoute = message.payload.testPlan.route;
   const targetUrl = message.payload.testPlan.baseUrl;
 
-  if (currentIsHttp) {
+  if (testPlanRoute) {
+    // Route discovered — navigate to baseUrl + route (e.g., http://localhost:3000/dashboard)
+    const fullUrl = targetUrl
+      ? new URL(testPlanRoute, targetUrl).href
+      : testPlanRoute;
+    console.log(`[Popcorn] Navigating to component route: ${fullUrl}`);
+    await chrome.tabs.update(tabId, { url: fullUrl });
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  } else if (currentIsHttp) {
     console.log(`[Popcorn] Active tab already on ${currentUrl} — running demo in place`);
   } else if (targetUrl && (targetUrl.startsWith('http://') || targetUrl.startsWith('https://'))) {
     console.log(`[Popcorn] Active tab not on a web page, navigating to ${targetUrl}`);
